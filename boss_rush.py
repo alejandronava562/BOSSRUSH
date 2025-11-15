@@ -57,6 +57,11 @@ STATE: Dict[str, Any] = {
         Robert(name = "Chemical Crusher", category = "Chemical pollution and hazardous waste").__dict__,
         Robert(name = "Noise Nemesis", category = "Noise pollution and disturbance").__dict__,
         Robert(name = "Light Looter", category = "Light pollution and energy waste").__dict__,
+        Robert(name = "The Landfill Lord", category = "incompetence or destructiveness in environmental stewardship").__dict__,
+        Robert(name = "Mr. Incinerator", category = "waste burning,  pollution").__dict__,
+        Robert(name = "Forest Fumbler", category = "Habitats and Ecosystem Destroyer").__dict__,
+        Robert(name = "Tree Slayer", category = "Tree cutter").__dict__, 
+        Robert(name = "Chief Habitat Wrecker", category = "destroys habitats").__dict__, 
     ],
     "log": []
 }
