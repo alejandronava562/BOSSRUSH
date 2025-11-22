@@ -14,7 +14,8 @@ from openai import OpenAI
 # ---------------------- #
 
 # ---- app name here ---- #
-Anyable-Harry(idk how it makes sense tho)
+# Anyable-Harry(idk how it makes sense tho)
+# Sustainify
 # ---------------------- #
 
 API_KEY = os.getenv("OPENAI_API_KEY")
@@ -40,10 +41,9 @@ class Robert:
 STATE: Dict[str, Any] = {
     "player": BOBBY(),
     "bosses" : [
-        Robert(name = "The Landfill Lord", category = "").__dict__,
+        Robert(name = "The Landfill Lord", category = "incompetence or destructiveness in environmental stewardship").__dict__,
         Robert(name = "Carbon King", category = "carbon footprint, pollution, global warming").__dict__,
         Robert(name = "Mr. Incinerator", category = "waste burning,  pollution").__dict__,
-        Robert(name = "The Lorax Jr", category = "Habitats and Ecosystem").__dict__,
         Robert(name = "Tree Slayer", category = "Tree cutter").__dict__, 
         Robert(name = "Plastic Pirate", category = "Plastic pollution").__dict__,
         Robert(name = "Water Waster", category = "Water pollution and wastage").__dict__,
@@ -58,10 +58,7 @@ STATE: Dict[str, Any] = {
         Robert(name = "Chemical Crusher", category = "Chemical pollution and hazardous waste").__dict__,
         Robert(name = "Noise Nemesis", category = "Noise pollution and disturbance").__dict__,
         Robert(name = "Light Looter", category = "Light pollution and energy waste").__dict__,
-        Robert(name = "The Landfill Lord", category = "incompetence or destructiveness in environmental stewardship").__dict__,
-        Robert(name = "Mr. Incinerator", category = "waste burning,  pollution").__dict__,
         Robert(name = "Forest Fumbler", category = "Habitats and Ecosystem Destroyer").__dict__,
-        Robert(name = "Tree Slayer", category = "Tree cutter").__dict__, 
         Robert(name = "Chief Habitat Wrecker", category = "destroys habitats").__dict__, 
     ],
     "log": []
@@ -71,7 +68,7 @@ STATE: Dict[str, Any] = {
 # ---------- Prompting ---------- #
 # =============================== #
 SYSTEM = (
-    ""
+    "You are a boss fight narrotor that teaches sustainability. Please use appropiate language and content for kids and families."
 )
 
 def build_scene_prompt(boss: Robert, player: BOBBY) -> str:
@@ -94,6 +91,7 @@ def build_scene_prompt(boss: Robert, player: BOBBY) -> str:
 
     Return a strict JSON only. Template:
     {{
+        "scene": "short scene text",
         "choices" : [
         {{
             "id: "A",
@@ -121,11 +119,69 @@ def build_scene_prompt(boss: Robert, player: BOBBY) -> str:
         }},
         ]
     }}
-    
     """
     return SCENE_PROMPT
+
+def ask_model(boss, player, retries) -> Dict[str, any]:
+    prompt = build_scene_prompt(boss,player)
+    for attempt in range(retries+1):
+        try:
+            response = client.responses.create(
+                # experiment with this
+                model= "gpt-5-mini",
+                input=[{"role": "system", "content": SYSTEM},
+                    {"role": "user", "content": prompt}],
+            )
+            # Validation
+            data = json.loads(response.output_text)
+            # TODO: add assertion statements for JSON (later)
+            return data
+        except Exception as e:
+            if attempt == retries:
+                raise
+            time.sleep(0.6*(attempt+1))
+    return {}
+
+def fight_boss(b: Dict[str, any] ) -> bool:
+    player: BOBBY = STATE["player"]
+    boss = Robert(**b)
+    player.turn = 1
+
+    print("\n" + ("="*52))
+    return True
+
+def main():
+    # Level Selection
+    while True:
+        level = input("Choose level: ").strip().lower()
+        if level in ["easy", "medium", "hard"]:
+            break
+        print("Please type easy, medium, or hard")
+    if level == "easy":
+        required_wins = 3
+
+    elif level == "medium":
+        required_wins = 5
+        
+    else:
+        required_wins = 7
+
+
+    wins = 0
+    random.shuffle(STATE["bosses"])
+    print("Welcome to the eco-sustainable Boss Rush Game! In this game, you will fight bosses that aren't eco-sustainable, and by answering sustainability questions correctly, you can damage them. Good luck!")
+    print(f'You must defeat {required_wins} bosses to win.')
+    for boss in STATE["bosses"]:
+        outcome = fight_boss(boss)
+        if outcome == True:
+            wins += 1
+        if wins >= required_wins:
+            break
+    if wins >= required_wins:
+        print("Victory")
+    else:
+        print("Lost")
+
+if __name__ == "__main__":
+    main()
     
-
-
-print("Welcome to the eco-sustainible Boss Rush Game, in this game you will fight bosses that aren't eco-sustainible, and by answering sustainible questions right, you can damage the bosses.Good Luck!") 
-print(" Welcome to the bike-travelling Boss Escape Game, in this game you will run around and avoid the smashing car on a bike! You can escape! Good Luck!")
