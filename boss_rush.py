@@ -6,8 +6,7 @@ from typing import Dict, Any, List
 from openai import OpenAI
 
 # ---- comment here ---- #
-# Alejandro
-#Lucas
+# Lucas
 # Harry
 # Eason
 # Eddy
@@ -27,11 +26,6 @@ class BOBBY:
     turn: int = 1
 
 @dataclass
-# (Enviromental sustainability hater1)
-# The Landfill Lord - name
-# Mr Lorax Jr - name
-# Carbon King/Queen - name
-# Mr. Incinerator - name
 class Robert:   
     name: str
     category: str
@@ -92,37 +86,37 @@ def build_scene_prompt(boss: Robert, player: BOBBY) -> str:
     Return a strict JSON only. Template:
     {{
         "scene": "short scene text",
-        "choices" : [
-        {{
-            "id: "A",
-            "text" : "choice text",
-            "delta_player": {"hp": "int in range (-10, 0)"}
-            "delta_boss": {"hp": "int in range (-10, 0)"}
-        }},
-        {{
-            "id: "B",
-            "text" : "choice text",
-            "delta_player": {"hp": "int in range (-10, 0)"}
-            "delta_boss": {"hp": "int in range (-10, 0)"}
-        }},
-        {{
-            "id: "C",
-            "text" : "choice text",
-            "delta_player": {"hp": "int in range (-10, 0)"}
-            "delta_boss": {"hp": "int in range (-10, 0)"}
-        }},
-        {{
-            "id: "D",
-            "text" : "choice text",
-            "delta_player": {"hp": "int in range (-10, 0)"}
-            "delta_boss": {"hp": "int in range (-10, 0)"}
-        }},
+        "choices": [
+            {{
+                "id": "A",
+                "text": "choice text",
+                "delta_player": {{"hp": "int in range (-10, 0)"}},
+                "delta_boss": {{"hp": "int in range (-10, 0)"}}
+            }},
+            {{
+                "id": "B",
+                "text": "choice text",
+                "delta_player": {{"hp": "int in range (-10, 0)"}},
+                "delta_boss": {{"hp": "int in range (-10, 0)"}}
+            }},
+            {{
+                "id": "C",
+                "text": "choice text",
+                "delta_player": {{"hp": "int in range (-10, 0)"}},
+                "delta_boss": {{"hp": "int in range (-10, 0)"}}
+            }},
+            {{
+                "id": "D",
+                "text": "choice text",
+                "delta_player": {{"hp": "int in range (-10, 0)"}},
+                "delta_boss": {{"hp": "int in range (-10, 0)"}}
+            }}
         ]
     }}
     """
     return SCENE_PROMPT
 
-def ask_model(boss, player, retries) -> Dict[str, any]:
+def ask_model(boss, player, retries : int = 2) -> Dict[str, any]:
     prompt = build_scene_prompt(boss,player)
     for attempt in range(retries+1):
         try:
@@ -148,6 +142,15 @@ def fight_boss(b: Dict[str, any] ) -> bool:
     player.turn = 1
 
     print("\n" + ("="*52))
+    print(f'Boss: {boss.name}')
+    print(f'Category : {boss.category}')
+    print("="*52)
+
+    while player.hp > 0 and boss.hp > 0:
+        fight_data = ask_model(boss, player)
+        print(fight_data)
+        input("waiting")
+        
     return True
 
 def main():
