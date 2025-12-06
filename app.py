@@ -3,9 +3,9 @@ import json, random, time, os
 from dataclasses import dataclass, asdict
 from typing import Dict, Any
 from openai import OpenAI
-
+from dotenv import load_dotenv
 # === Imported code from boss_rush.py (unchanged except I removed input() loops) === #
-
+load_dotenv()
 API_KEY = os.getenv("OPENAI_API_KEY")
 client = OpenAI(api_key=API_KEY)
 
@@ -65,7 +65,7 @@ def ask_model(boss, player):
         model="gpt-5-mini",
         input=[
             {"role": "system", "content": SYSTEM},
-            {"role": "user", "content": prompt}
+            {"role": "user", "content": prompt} 
         ],
     )
     return json.loads(response.output_text)
