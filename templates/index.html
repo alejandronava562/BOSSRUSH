@@ -1,127 +1,54 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Eco Boss Rush</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sustainability App - Start</title>
+  <link rel="stylesheet" href="{{url_for('static', filename='styles.css')}}" />
 </head>
 <body>
-    <h1>Eco Boss Rush</h1>
+  <main class="container">
+    <section class="card" aria-labelledby="title">
+      <h1 id="title">Sustainability App</h1>
 
-    <!-- Simple menu -->
-    <div id="menu">
-        <label>
-            Username:
-            <input id="username" type="text">
-        </label>
-        <button onclick="startGame()">Start Game</button>
-    </div>
+      <form id="startForm" novalidate>
+        <div class="field">
+          <label for="username">Username</label>
+          <input
+            id="username"
+            name="username"
+            type="text"
+            required
+            autocomplete="username"
+            aria-required="true"
+          />
+        </div>
 
-    <!-- Simple game view -->
-    <div id="game" style="display:none;">
-        <p id="hud"></p>
-        <div id="scene"></div>
-        <div id="choices"></div>
-        <button id="restart" style="display:none;" onclick="showMenu()">Back to Menu</button>
-    </div>
+        <fieldset class="field">
+          <legend>Difficulty</legend>
+          <div class="difficulty-group" role="radiogroup" aria-required="true">
+            <button type="button" class="difficulty" data-value="easy" role="radio" aria-checked="false">
+              Easy
+            </button>
+            <button type="button" class="difficulty" data-value="medium" role="radio" aria-checked="false">
+              Medium
+            </button>
+            <button type="button" class="difficulty" data-value="hard" role="radio" aria-checked="false">
+              Hard
+            </button>
+          </div>
+        </fieldset>
 
-    <script>
-        let bosses = [];
-        let currentBoss = 0;
-        let username = "";
+        <button id="startBtn" type="submit" disabled>
+          Start
+        </button>
+      </form>
+    </section>
+  </main>
 
-        function showMenu() {
-            document.getElementById("menu").style.display = "block";
-            document.getElementById("game").style.display = "none";
-            document.getElementById("scene").innerHTML = "";
-            document.getElementById("choices").innerHTML = "";
-            document.getElementById("restart").style.display = "none";
-        }
-
-        async function startGame() {
-            const nameInput = document.getElementById("username");
-            username = (nameInput.value || "").trim();
-            if (!username) {
-                alert("Please enter a username.");
-                return;
-            }
-
-            const res = await fetch("/api/start");
-            const data = await res.json();
-            bosses = data.bosses || [];
-            currentBoss = 0;
-
-            document.getElementById("menu").style.display = "none";
-            document.getElementById("game").style.display = "block";
-
-            updateHud(25, bosses[0]?.hp ?? 0);
-            loadScene();
-        }
-
-        function updateHud(playerHp, bossHp) {
-            const bossName = bosses[currentBoss]?.name || "Unknown Boss";
-            document.getElementById("hud").textContent =
-                username + " HP: " + playerHp + " | " + bossName + " HP: " + bossHp;
-        }
-
-        async function loadScene() {
-            if (!bosses.length || currentBoss >= bosses.length) {
-                document.getElementById("scene").innerHTML =
-                    "<p>You defeated every eco boss! Great job.</p>";
-                document.getElementById("choices").innerHTML = "";
-                document.getElementById("restart").style.display = "inline-block";
-                return;
-            }
-
-            const res = await fetch("/api/scene", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ boss_index: currentBoss })
-            });
-
-            const data = await res.json();
-            document.getElementById("scene").innerHTML = "<p>" + data.scene + "</p>";
-
-            const choicesDiv = document.getElementById("choices");
-            choicesDiv.innerHTML = "";
-            data.choices.forEach(choice => {
-                const btn = document.createElement("button");
-                btn.textContent = choice.text;
-                btn.onclick = () => choose(choice.delta_player, choice.delta_boss);
-                choicesDiv.appendChild(btn);
-                choicesDiv.appendChild(document.createElement("br"));
-            });
-        }
-
-        async function choose(deltaPlayer, deltaBoss) {
-            const res = await fetch("/api/apply_choice", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    boss_index: currentBoss,
-                    delta_player: deltaPlayer,
-                    delta_boss: deltaBoss
-                })
-            });
-
-            const result = await res.json();
-            updateHud(result.player_hp, result.boss_hp);
-
-            if (result.player_hp <= 0) {
-                document.getElementById("scene").innerHTML =
-                    "<p>You were defeated. Try again with greener choices!</p>";
-                document.getElementById("choices").innerHTML = "";
-                document.getElementById("restart").style.display = "inline-block";
-                return;
-            }
-
-            if (result.boss_hp <= 0) {
-                currentBoss += 1;
-                loadScene();
-                return;
-            }
-
-            loadScene();
-        }
-    </script>
+  <script src="{{url_for('static', filename='script.js')}}"></script>
 </body>
 </html>
+
+
+
