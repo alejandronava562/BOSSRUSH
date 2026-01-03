@@ -6,9 +6,7 @@ const statusEl = document.getElementById("status");
 const game_screen = document.getElementById("game_screen")
 const start_screen = document.getElementById("start_screen")
 
-function showGameScreen() {
-  start_screen?.classList.add("hidden");
-}
+
 let selectedDifficulty = null;
 
 function updateStartButton() {
@@ -65,6 +63,7 @@ form.addEventListener("submit", async (e) => {
     const data = await res.json();
     localStorage.setItem("bosses", JSON.stringify(data.bosses ?? []));
     localStorage.setItem("player_hp", data.player_hp ?? "3");
+    displayScene();
   } catch (err) {
     console.error(err);
     setStatus("Could not start game. Please try again.");
@@ -74,9 +73,11 @@ form.addEventListener("submit", async (e) => {
 });
 
 function loadFirstStage() {
-
+  
 }
 
 function displayScene(data, bossIndex, boss) {
-
+  start_screen.classList.add("hidden");
+  game_screen.classList.remove("hidden");
+  game_screen.setAttribute("aria-hidden", "false");
 }
