@@ -46,15 +46,47 @@
       </form>
     </section>
 
-    <section id="game_screen" class="card hidden" aria-hidden="true">
-        <h2>Game</h2>
-        <h2 id="boss_name">Boss</h2>
-        <p id="boss_hp"></p>
-        <p id="player_hp"></p>
-        <div id="choices"></div>
-        <p id="scene-text">...</p>
-        <p id="gameStatus">Loading...</p>
+    <section id="game_screen" class="card card-game hidden" aria-hidden="true">
+      <header class="game-header">
+        <div class="game-title">
+          <h2 id="game_title">Boss Rush</h2>
+          <p id="progress_text" class="muted"></p>
+        </div>
+        <button id="restartBtn" type="button" class="secondary hidden">Restart</button>
+      </header>
 
+      <section class="hud">
+        <div class="boss-panel">
+          <img id="boss_image" class="boss-image" alt="Boss portrait" />
+          <div class="boss-meta">
+            <h3 id="boss_name">Boss</h3>
+            <p id="boss_category" class="muted"></p>
+            <div class="bar-row">
+              <span class="bar-label">Boss HP</span>
+              <div class="bar"><div id="boss_hp_bar" class="bar-fill boss"></div></div>
+              <span id="boss_hp" class="bar-value"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="player-panel">
+          <div class="bar-row">
+            <span class="bar-label">Your HP</span>
+            <div class="bar"><div id="player_hp_bar" class="bar-fill player"></div></div>
+            <span id="player_hp" class="bar-value"></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="scene">
+        <p id="scene_text">...</p>
+      </section>
+
+      <section class="choices">
+        <div id="choices" class="choices-grid" aria-label="Choices"></div>
+        <p id="turn_feedback" role="status" aria-live="polite"></p>
+        <p id="sustainability_fact" class="muted"></p>
+      </section>
     </section>
   </main>
 
