@@ -46,17 +46,52 @@
       </form>
     </section>
 
-    <section id="game_screen" class="card hidden" aria-hidden="true">
-        <h2>Game</h2>
-        <h2 id="boss_name">Boss</h2>
-        <p id="boss_hp"></p>
-        <p id="player_hp"></p>
-        <div id="choices"></div>
-        <p id="scene-text">...</p>
-        <p id="gameStatus">Loading...</p>
+    <section id="game_screen" class="game-container hidden" aria-hidden="true">
+        <!-- Boss Display (Top) -->
+        <div class="boss-section">
+            <div class="boss-header">
+                <h2 id="boss_name">Boss Name</h2>
+                <div class="health-bars">
+                    <div class="health-display">
+                        <label>Player HP:</label>
+                        <div class="health-bar-bg">
+                            <div id="player_hp_bar" class="health-bar player-health"></div>
+                        </div>
+                        <span id="player_hp" class="hp-text">0/0</span>
+                    </div>
+                    <div class="health-display">
+                        <label>Boss HP:</label>
+                        <div class="health-bar-bg">
+                            <div id="boss_hp_bar" class="health-bar boss-health"></div>
+                        </div>
+                        <span id="boss_hp" class="hp-text">0/0</span>
+                    </div>
+                </div>
+            </div>
+            <div id="boss_visual" class="boss-visual">👹</div>
+        </div>
 
+        <!-- Scene/Story (Middle) -->
+        <div class="scene-section">
+            <p id="scene-text" class="scene-text">Loading battle scene...</p>
+            <p id="gameStatus" class="game-status"></p>
+        </div>
+
+        <!-- Choices (Bottom) -->
+        <div class="choices-section">
+            <div id="choices" class="choices-grid"></div>
+        </div>
+    </section>
     </section>
   </main>
+
+  <dialog id="factModal" class="fact-modal">
+    <div class="fact-content">
+      <h2>Did You Know? 🌱</h2>
+      <p id="factText">Loading...</p>
+      <button id="closeModalBtn">Got it!</button>
+    </div>
+  </dialog>
 
   <script src="{{url_for('static', filename='script.js')}}"></script>
 </body>
