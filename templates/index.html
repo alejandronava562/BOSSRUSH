@@ -46,52 +46,49 @@
       </form>
     </section>
 
-    <section id="game_screen" class="game-container hidden" aria-hidden="true">
-        <!-- Boss Display (Top) -->
-        <div class="boss-section">
-            <div class="boss-header">
-                <h2 id="boss_name">Boss Name</h2>
-                <div class="health-bars">
-                    <div class="health-display">
-                        <label>Player HP:</label>
-                        <div class="health-bar-bg">
-                            <div id="player_hp_bar" class="health-bar player-health"></div>
-                        </div>
-                        <span id="player_hp" class="hp-text">0/0</span>
-                    </div>
-                    <div class="health-display">
-                        <label>Boss HP:</label>
-                        <div class="health-bar-bg">
-                            <div id="boss_hp_bar" class="health-bar boss-health"></div>
-                        </div>
-                        <span id="boss_hp" class="hp-text">0/0</span>
-                    </div>
-                </div>
+    <section id="game_screen" class="card card-game hidden" aria-hidden="true">
+      <header class="game-header">
+        <div class="game-title">
+          <h2 id="game_title">Boss Rush</h2>
+          <p id="progress_text" class="muted"></p>
+        </div>
+        <button id="restartBtn" type="button" class="secondary hidden">Restart</button>
+      </header>
+
+      <section class="hud">
+        <div class="boss-panel">
+          <img id="boss_image" class="boss-image" alt="Boss portrait" />
+          <div class="boss-meta">
+            <h3 id="boss_name">Boss</h3>
+            <p id="boss_category" class="muted"></p>
+            <div class="bar-row">
+              <span class="bar-label">Boss HP</span>
+              <div class="bar"><div id="boss_hp_bar" class="bar-fill boss"></div></div>
+              <span id="boss_hp" class="bar-value"></span>
             </div>
-            <div id="boss_visual" class="boss-visual">👹</div>
+          </div>
         </div>
 
-        <!-- Scene/Story (Middle) -->
-        <div class="scene-section">
-            <p id="scene-text" class="scene-text">Loading battle scene...</p>
-            <p id="gameStatus" class="game-status"></p>
+        <div class="player-panel">
+          <div class="bar-row">
+            <span class="bar-label">Your HP</span>
+            <div class="bar"><div id="player_hp_bar" class="bar-fill player"></div></div>
+            <span id="player_hp" class="bar-value"></span>
+          </div>
         </div>
+      </section>
 
-        <!-- Choices (Bottom) -->
-        <div class="choices-section">
-            <div id="choices" class="choices-grid"></div>
-        </div>
-    </section>
+      <section class="scene">
+        <p id="scene_text">...</p>
+      </section>
+
+      <section class="choices">
+        <div id="choices" class="choices-grid" aria-label="Choices"></div>
+        <p id="turn_feedback" role="status" aria-live="polite"></p>
+        <p id="sustainability_fact" class="muted"></p>
+      </section>
     </section>
   </main>
-
-  <dialog id="factModal" class="fact-modal">
-    <div class="fact-content">
-      <h2>Did You Know? 🌱</h2>
-      <p id="factText">Loading...</p>
-      <button id="closeModalBtn">Got it!</button>
-    </div>
-  </dialog>
 
   <script src="{{url_for('static', filename='script.js')}}"></script>
 </body>

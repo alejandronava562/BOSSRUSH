@@ -1,156 +1,348 @@
-from flask import Flask, request, jsonify, render_template, Response
-import json, random, time, os, re
-from dataclasses import dataclass, asdict
-from typing import Dict, Any
-from openai import OpenAI
+from __future__ import annotations
+
+import base64
+import json
+import os
+import random
+import time
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
+
 from dotenv import load_dotenv
-# === Imported code from boss_rush.py (unchanged except I removed input() loops) === #
+from flask import Flask, jsonify, render_template, request
+from openai import OpenAI
+
 load_dotenv()
+
 API_KEY = os.getenv("OPENAI_API_KEY")
-client = OpenAI(api_key=API_KEY)
+client = OpenAI(api_key=API_KEY) if API_KEY else None
+
+app = Flask(__name__)
+
 
 @dataclass
-class BOBBY:
-    hp: int = 3
+class Player:
+    hp: int
     turn: int = 1
 
+
 @dataclass
-class Robert:
+class Boss:
     name: str
     category: str
-    hp: int = 50
+    hp: int
+    image_data_url: Optional[str] = None
 
-STATE: Dict[str, Any] = {
-    "player": BOBBY(),
-    "bosses": [
-        Robert(name="The Landfill Lord", category="incompetence or destructiveness in environmental stewardship").__dict__,
-        Robert(name="Carbon King", category="carbon footprint, pollution, global warming").__dict__,
-        Robert(name="Mr. Incinerator", category="waste burning,  pollution").__dict__,
-    ],
-    "log": [],
-    "prefetched_scenes": {} 
-}
 
 SYSTEM = (
     "You are a boss fight narrator that teaches sustainability. "
     "Keep language appropriate for kids and families."
 )
 
-def build_scene_prompt(boss: Robert, player: BOBBY) -> str:
-    return f"""
-    Boss Name: {boss.name}
-    Boss Category: {boss.category}
+BOSS_LIBRARY: List[Tuple[str, str]] = [
+    ("The Landfill Lord", "incompetence or destructiveness in environmental stewardship"),
+    ("Carbon King", "carbon footprint, pollution, global warming"),
+    ("Mr. Incinerator", "waste burning, pollution"),
+    ("Tree Slayer", "deforestation and habitat destruction"),
+    ("Plastic Pirate", "plastic pollution in rivers and oceans"),
+    ("Water Waster", "water pollution and wasting clean water"),
+    ("Energy Eater", "wasting electricity and fossil fuel dependence"),
+    ("Air Polluter", "air pollution and emissions"),
+    ("Soil Spoiler", "soil contamination and degradation"),
+    ("Wildlife Wrecker", "biodiversity loss and habitat destruction"),
+    ("Ocean Obliterator", "marine pollution and overfishing"),
+    ("Climate Conqueror", "climate change and global warming"),
+    ("Garbage Goblin", "waste management and littering"),
+    ("Fossil Fuel Fiend", "fossil fuel dependence and pollution"),
+    ("Chemical Crusher", "chemical pollution and hazardous waste"),
+    ("Noise Nemesis", "noise pollution and disturbance"),
+    ("Light Looter", "light pollution and energy waste"),
+    ("Forest Fumbler", "destroying habitats and ecosystems"),
+    ("Chief Habitat Wrecker", "destroying habitats"),
+]
 
-    Current Stats:
-    - Player HP: {player.hp}
-    - Boss HP: {boss.hp}
 
-    Write a battle scene about environmental sustainability related to the boss's category.
-    
-    IMPORTANT: Create exactly 4 choices where:
-    - ONE choice is clearly the CORRECT sustainable/eco-friendly answer (deals -10 to -15 damage to boss, 0 damage to player)
-    - THREE choices are clearly WRONG or harmful to the environment (deal -1 to -4 damage to player, 0 damage to boss)
-    
-    Make it obvious which answer teaches good sustainability practices.
-    
-    Return JSON only:
-    {{
-        "scene": "2-3 sentence battle scene describing the environmental challenge",
-        "choices": [
-            {{
-                "id": "A",
-                "text": "choice text",
-                "delta_player": {{"hp": 0 or negative int}},
-                "delta_boss": {{"hp": 0 or negative int}}
-            }},
-            {{
-                "id": "B",
-                "text": "choice text", 
-                "delta_player": {{"hp": 0 or negative int}},
-                "delta_boss": {{"hp": 0 or negative int}}
-            }},
-            {{
-                "id": "C",
-                "text": "choice text",
-                "delta_player": {{"hp": 0 or negative int}},
-                "delta_boss": {{"hp": 0 or negative int}}
-            }},
-            {{
-                "id": "D",
-                "text": "choice text",
-                "delta_player": {{"hp": 0 or negative int}},
-                "delta_boss": {{"hp": 0 or negative int}}
-            }}
-        ]
-    }}
-    """
+def _difficulty_settings(difficulty: str) -> Dict[str, Any]:
+    hp_by_difficulty = {"easy": 10, "medium": 7, "hard": 5}
+    boss_hp_by_difficulty = {"easy": 35, "medium": 45, "hard": 55}
+    required_wins = {"easy": 3, "medium": 5, "hard": 7}
+    sustainable_choices = {"easy": 2, "medium": 1, "hard": 1}
 
-def shuffle_choices(data):
-    """Shuffle choices and reassign IDs A, B, C, D."""
-    if "choices" in data and len(data["choices"]) > 1:
-        random.shuffle(data["choices"])
-        for i, choice in enumerate(data["choices"]):
-            choice["id"] = chr(65 + i)  # A, B, C, D
-    return data
+    return {
+        "player_hp": hp_by_difficulty.get(difficulty, 7),
+        "boss_hp": boss_hp_by_difficulty.get(difficulty, 45),
+        "required_wins": required_wins.get(difficulty, 5),
+        "sustainable_choices": sustainable_choices.get(difficulty, 1),
+    }
 
-def ask_model(boss, player):
-    prompt = build_scene_prompt(boss, player)
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": SYSTEM},
-            {"role": "user", "content": prompt} 
-        ],
-    )
+
+STATE: Dict[str, Any] = {
+    "active": False,
+    "username": None,
+    "difficulty": None,
+    "required_wins": 0,
+    "wins": 0,
+    "current_boss_index": 0,
+    "player": Player(hp=7),
+    "bosses": [],  # list[Boss as dict]
+    "current_scene_raw": None,  # stores full model payload including deltas
+    "log": [],
+}
+
+
+def _extract_json_object(text: str) -> Dict[str, Any]:
     try:
-        result = json.loads(response.choices[0].message.content)
-        return shuffle_choices(result)
-    except (json.JSONDecodeError, IndexError, AttributeError) as e:
-        return {
-            "scene": "An error occurred generating the scene. Please try again.",
-            "choices": [{"id": "A", "text": "Retry", "delta_player": {"hp": 0}, "delta_boss": {"hp": 0}}]
-        }
+        return json.loads(text)
+    except Exception:
+        pass
 
-def stream_scene(boss, player):
-    """Generator that yields SSE events for streaming scene text."""
-    prompt = build_scene_prompt(boss, player)
-    
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        raise ValueError("Model did not return JSON.")
+    return json.loads(text[start : end + 1])
+
+
+def _clamp_int(value: Any, min_value: int, max_value: int) -> int:
     try:
-        stream = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": SYSTEM},
-                {"role": "user", "content": prompt}
-            ],
-            stream=True
+        n = int(value)
+    except Exception:
+        n = 0
+    return max(min_value, min(max_value, n))
+
+
+def _validate_and_normalize_scene(
+    payload: Dict[str, Any], sustainable_needed: int
+) -> Dict[str, Any]:
+    scene = str(payload.get("scene", "")).strip()
+    choices = payload.get("choices", [])
+    if not scene or not isinstance(choices, list) or len(choices) != 4:
+        raise ValueError("Invalid scene payload.")
+
+    normalized: List[Dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for choice in choices:
+        cid = str(choice.get("id", "")).strip().upper()
+        if cid not in {"A", "B", "C", "D"} or cid in seen_ids:
+            raise ValueError("Choices must have unique ids A-D.")
+        seen_ids.add(cid)
+
+        text = str(choice.get("text", "")).strip()
+        if not text:
+            raise ValueError("Choice text is required.")
+
+        is_sustainable = bool(choice.get("is_sustainable", False))
+        delta_player = choice.get("delta_player", {}) or {}
+        delta_boss = choice.get("delta_boss", {}) or {}
+
+        dp = _clamp_int(delta_player.get("hp", 0), -10, 2)
+        db = _clamp_int(delta_boss.get("hp", 0), -20, 5)
+
+        normalized.append(
+            {
+                "id": cid,
+                "text": text,
+                "is_sustainable": is_sustainable,
+                "delta_player": {"hp": dp},
+                "delta_boss": {"hp": db},
+            }
         )
-        
-        full_response = ""
-        for chunk in stream:
-            if chunk.choices and chunk.choices[0].delta.content:
-                content = chunk.choices[0].delta.content
-                full_response += content
-                # Yield each chunk as SSE event
-                yield f"data: {json.dumps({'type': 'chunk', 'content': content})}\n\n"
-        
-        # Parse the full response and send final data
+
+    sustainable_count = sum(1 for c in normalized if c["is_sustainable"])
+    if sustainable_count != sustainable_needed:
+        raise ValueError("Wrong number of sustainable choices.")
+
+    return {"scene": scene, "choices": normalized}
+
+
+def _fallback_scene(boss: Boss, player: Player, sustainable_needed: int) -> Dict[str, Any]:
+    scene = (
+        f"{boss.name} blocks your path and brags about {boss.category}. "
+        "You remember that small choices can protect the planet. "
+        "What do you do?"
+    )
+
+    sustainable = [
+        {
+            "id": "A",
+            "text": "Refuse the wasteful plan and choose a reuse/repair option instead.",
+            "is_sustainable": True,
+            "delta_player": {"hp": 0},
+            "delta_boss": {"hp": -12},
+        },
+        {
+            "id": "B",
+            "text": "Pick a low-carbon option (save energy, avoid single-use, and recycle right).",
+            "is_sustainable": True,
+            "delta_player": {"hp": 1},
+            "delta_boss": {"hp": -10},
+        },
+    ]
+    unsustainable = [
+        {
+            "id": "C",
+            "text": "Do the easy-but-wasteful option and throw everything away.",
+            "is_sustainable": False,
+            "delta_player": {"hp": -4},
+            "delta_boss": {"hp": -2},
+        },
+        {
+            "id": "D",
+            "text": "Ignore the impact and use extra resources just to be faster.",
+            "is_sustainable": False,
+            "delta_player": {"hp": -5},
+            "delta_boss": {"hp": 0},
+        },
+    ]
+
+    if sustainable_needed == 1:
+        sustainable = [sustainable[0]]
+        unsustainable = [
+            {**unsustainable[0], "id": "B"},
+            {**unsustainable[1], "id": "C"},
+            {
+                "id": "D",
+                "text": "Use more power and water than you need, because it feels strong.",
+                "is_sustainable": False,
+                "delta_player": {"hp": -6},
+                "delta_boss": {"hp": -1},
+            },
+        ]
+
+    choices = (sustainable + unsustainable)[:4]
+    return {"scene": scene, "choices": choices}
+
+
+def build_scene_prompt(boss: Boss, player: Player, difficulty: str) -> str:
+    sustainable_needed = _difficulty_settings(difficulty)["sustainable_choices"]
+    return f"""
+Boss Name: {boss.name}
+Boss Category: {boss.category}
+Difficulty: {difficulty}
+
+Current Stats:
+- Player HP: {player.hp}
+- Boss HP: {boss.hp}
+
+Write a new battle scene (3-5 sentences) with 4 choices (A-D).
+
+Rules:
+- Exactly {sustainable_needed} out of 4 choices must be sustainable (good for the environment).
+- The other choices must be unsustainable (wasteful, polluting, or harmful).
+- Do not label which choices are correct in the scene text.
+- Keep language kid-friendly.
+- Each choice must include:
+  - id: "A" | "B" | "C" | "D"
+  - text: short, clear action
+  - is_sustainable: boolean
+  - delta_player.hp: int (range -10 to 2)
+  - delta_boss.hp: int (range -20 to 5)
+
+Balancing:
+- Sustainable choices should usually be better for the player and deal more damage to the boss.
+- Unsustainable choices should usually hurt the player and deal little/no damage to the boss.
+
+Return JSON only in this exact shape:
+{{
+  "scene": "string",
+  "choices": [
+    {{
+      "id": "A",
+      "text": "string",
+      "is_sustainable": true,
+      "delta_player": {{"hp": 0}},
+      "delta_boss": {{"hp": -12}}
+    }}
+  ]
+}}
+""".strip()
+
+
+def _ask_model_for_scene(boss: Boss, player: Player, difficulty: str) -> Dict[str, Any]:
+    if not client:
+        return _fallback_scene(boss, player, _difficulty_settings(difficulty)["sustainable_choices"])
+
+    prompt = build_scene_prompt(boss, player, difficulty)
+    sustainable_needed = _difficulty_settings(difficulty)["sustainable_choices"]
+
+    last_error: Optional[Exception] = None
+    for attempt in range(3):
         try:
-            # Clean JSON from markdown code blocks if present
-            cleaned = re.sub(r'^```json\s*', '', full_response.strip())
-            cleaned = re.sub(r'\s*```$', '', cleaned)
-            parsed = json.loads(cleaned)
-            shuffled = shuffle_choices(parsed)
-            yield f"data: {json.dumps({'type': 'complete', 'scene': shuffled.get('scene', ''), 'choices': shuffled.get('choices', [])})}\n\n"
-        except json.JSONDecodeError:
-            yield f"data: {json.dumps({'type': 'error', 'message': 'Failed to parse response'})}\n\n"
-            
-    except Exception as e:
-        yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            response = client.responses.create(
+                model="gpt-5-mini",
+                input=[
+                    {"role": "system", "content": SYSTEM},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+            data = _extract_json_object(response.output_text)
+            return _validate_and_normalize_scene(data, sustainable_needed)
+        except Exception as e:
+            last_error = e
+            time.sleep(0.6 * (attempt + 1))
+
+    # Last-resort fallback so the app remains playable.
+    return _fallback_scene(boss, player, sustainable_needed)
 
 
-# === Flask App === #
+def _scene_for_client(scene_raw: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "scene": scene_raw["scene"],
+        "choices": [{"id": c["id"], "text": c["text"]} for c in scene_raw["choices"]],
+    }
 
-app = Flask(__name__)
+
+def _boss_image_placeholder(boss: Boss) -> str:
+    initials = "".join([w[0] for w in boss.name.split()[:2]]).upper() or "B"
+    svg = f"""
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0ea5e9"/>
+      <stop offset="1" stop-color="#22c55e"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="36" fill="url(#g)"/>
+  <text x="50%" y="52%" text-anchor="middle" font-size="168" font-family="system-ui,Segoe UI,Roboto" fill="#052e16" font-weight="800">
+    {initials}
+  </text>
+</svg>
+""".strip()
+    b64 = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+    return f"data:image/svg+xml;base64,{b64}"
+
+
+def _get_or_generate_boss_image(boss_dict: Dict[str, Any]) -> str:
+    if boss_dict.get("image_data_url"):
+        return boss_dict["image_data_url"]
+
+    boss = Boss(**{k: boss_dict.get(k) for k in ["name", "category", "hp"]})
+    if not client:
+        boss_dict["image_data_url"] = _boss_image_placeholder(boss)
+        return boss_dict["image_data_url"]
+
+    prompt = (
+        "Create a kid-friendly, Pokemon-style boss character portrait. "
+        "It should look like a cute-but-intimidating villain. "
+        "No words or text in the image. "
+        f"Boss name: {boss.name}. "
+        f"Theme: {boss.category}. "
+        "Clean simple background, bright colors, high contrast."
+    )
+
+    try:
+        img = client.images.generate(
+            model="gpt-image-1",
+            prompt=prompt,
+            size="512x512",
+            response_format="b64_json",
+        )
+        b64 = img.data[0].b64_json
+        boss_dict["image_data_url"] = f"data:image/png;base64,{b64}"
+        return boss_dict["image_data_url"]
+    except Exception:
+        boss_dict["image_data_url"] = _boss_image_placeholder(boss)
+        return boss_dict["image_data_url"]
 
 @app.route("/")
 def index():
@@ -159,85 +351,208 @@ def index():
 @app.route("/api/start", methods=["GET", "POST"])
 def start_game():
     payload = request.get_json(silent=True) or {}
-    username = payload.get("username")
-    difficulty = payload.get("difficulty")
-    hp_by_difficulty = {"easy": 20, "medium": 15, "hard": 10}
-    if not difficulty:
-        return jsonify({"error": "Missing difficulty"}), 400
-    
-    start_hp = hp_by_difficulty.get(difficulty, 3)
-    random.shuffle(STATE["bosses"])
-    STATE["player"] = BOBBY(hp=start_hp)
-    STATE["username"] = username
-    STATE["difficulty"] = difficulty
+    username = (payload.get("username") or "").strip() or "Player"
+    difficulty = (payload.get("difficulty") or "").strip().lower()
+    if difficulty not in {"easy", "medium", "hard"}:
+        return jsonify({"error": "Difficulty must be easy, medium, or hard."}), 400
 
-    return jsonify({
-        "message": "Game started.",
-        "bosses": STATE["bosses"],
-        "username": username,
-        "difficulty": difficulty,
-        "player_hp": STATE["player"].hp
-    })
+    settings = _difficulty_settings(difficulty)
+
+    bosses = []
+    for name, category in BOSS_LIBRARY:
+        bosses.append(Boss(name=name, category=category, hp=settings["boss_hp"]).__dict__)
+    random.shuffle(bosses)
+
+    STATE.update(
+        {
+            "active": True,
+            "username": username,
+            "difficulty": difficulty,
+            "required_wins": settings["required_wins"],
+            "wins": 0,
+            "current_boss_index": 0,
+            "player": Player(hp=settings["player_hp"]),
+            "bosses": bosses,
+            "current_scene_raw": None,
+            "log": [],
+        }
+    )
+
+    # Pre-load first boss scene and image so the UI feels instant.
+    boss_dict = STATE["bosses"][STATE["current_boss_index"]]
+    boss = Boss(**{k: boss_dict[k] for k in ["name", "category", "hp"]})
+    scene_raw = _ask_model_for_scene(boss, STATE["player"], difficulty)
+    STATE["current_scene_raw"] = {"boss_index": STATE["current_boss_index"], **scene_raw}
+
+    image_data_url = _get_or_generate_boss_image(boss_dict)
+
+    return jsonify(
+        {
+            "message": "Game started.",
+            "username": username,
+            "difficulty": difficulty,
+            "required_wins": STATE["required_wins"],
+            "wins": STATE["wins"],
+            "current_boss_index": STATE["current_boss_index"],
+            "player_hp": STATE["player"].hp,
+            "boss": {"name": boss_dict["name"], "category": boss_dict["category"], "hp": boss_dict["hp"]},
+            "boss_image": image_data_url,
+            **_scene_for_client(scene_raw),
+        }
+    )
 
 @app.route("/api/scene", methods=["POST"])
 def scene():
-    data = request.json
-    boss_index = data["boss_index"]
-    
-    cache_key = f"boss_{boss_index}_hp_{STATE['bosses'][boss_index]['hp']}_player_{STATE['player'].hp}"
-    if cache_key in STATE["prefetched_scenes"]:
-        result = STATE["prefetched_scenes"].pop(cache_key)
-        return jsonify(result)
+    if not STATE.get("active"):
+        return jsonify({"error": "Game not started."}), 400
 
-    boss = Robert(**STATE["bosses"][boss_index])
-    player = STATE["player"]
+    data = request.get_json(silent=True) or {}
+    boss_index = int(data.get("boss_index", STATE["current_boss_index"]))
+    boss_index = max(0, min(boss_index, len(STATE["bosses"]) - 1))
+    STATE["current_boss_index"] = boss_index
 
-    result = ask_model(boss, player)
-    return jsonify(result)
+    boss_dict = STATE["bosses"][boss_index]
+    boss = Boss(**{k: boss_dict[k] for k in ["name", "category", "hp"]})
+    difficulty = STATE["difficulty"]
 
-@app.route("/api/scene/stream", methods=["POST"])
-def scene_stream():
-    """Stream scene text via SSE for typewriter effect."""
-    data = request.json
-    boss_index = data["boss_index"]
-    
-    # Check cache first - if cached, return as single complete event
-    cache_key = f"boss_{boss_index}_hp_{STATE['bosses'][boss_index]['hp']}_player_{STATE['player'].hp}"
-    if cache_key in STATE["prefetched_scenes"]:
-        result = STATE["prefetched_scenes"].pop(cache_key)
-        def cached_response():
-            yield f"data: {json.dumps({'type': 'complete', 'scene': result.get('scene', ''), 'choices': result.get('choices', [])})}\n\n"
-        return Response(cached_response(), mimetype='text/event-stream')
-    
-    boss = Robert(**STATE["bosses"][boss_index])
-    player = STATE["player"]
-    
-    return Response(stream_scene(boss, player), mimetype='text/event-stream')
+    scene_raw = _ask_model_for_scene(boss, STATE["player"], difficulty)
+    STATE["current_scene_raw"] = {"boss_index": boss_index, **scene_raw}
+
+    image_data_url = _get_or_generate_boss_image(boss_dict)
+
+    return jsonify(
+        {
+            "username": STATE["username"],
+            "difficulty": difficulty,
+            "required_wins": STATE["required_wins"],
+            "wins": STATE["wins"],
+            "current_boss_index": boss_index,
+            "player_hp": STATE["player"].hp,
+            "boss": {"name": boss_dict["name"], "category": boss_dict["category"], "hp": boss_dict["hp"]},
+            "boss_image": image_data_url,
+            **_scene_for_client(scene_raw),
+        }
+    )
 
 @app.route("/api/apply_choice", methods=["POST"])
 def apply_choice():
-    data = request.json
-    boss_index = data["boss_index"]
-    delta_player = data["delta_player"]
-    delta_boss = data["delta_boss"]
+    if not STATE.get("active"):
+        return jsonify({"error": "Game not started."}), 400
 
-    STATE["player"].hp += delta_player["hp"]
-    STATE["bosses"][boss_index]["hp"] += delta_boss["hp"]
-    
-    try:
-        if STATE["bosses"][boss_index]["hp"] > 0 and STATE["player"].hp > 0:
-            boss = Robert(**STATE["bosses"][boss_index])
-            player = STATE["player"]
-            next_scene = ask_model(boss, player)
-            cache_key = f"boss_{boss_index}_hp_{boss.hp}_player_{player.hp}"
-            STATE["prefetched_scenes"][cache_key] = next_scene
-    except Exception:
-        pass  # Silent fail—scene will be generated on-demand if prefetch fails
+    data = request.get_json(silent=True) or {}
+    choice_id = str(data.get("choice_id", "")).strip().upper()
+    if choice_id not in {"A", "B", "C", "D"}:
+        return jsonify({"error": "choice_id must be A, B, C, or D."}), 400
 
-    return jsonify({
-        "player_hp": STATE["player"].hp,
-        "boss_hp": STATE["bosses"][boss_index]["hp"]
-    })
+    boss_index = STATE["current_boss_index"]
+    boss_dict = STATE["bosses"][boss_index]
+    boss = Boss(**{k: boss_dict[k] for k in ["name", "category", "hp"]})
+    difficulty = STATE["difficulty"]
+
+    scene_raw = STATE.get("current_scene_raw")
+    if not scene_raw or scene_raw.get("boss_index") != boss_index:
+        scene_raw = _ask_model_for_scene(boss, STATE["player"], difficulty)
+        scene_raw = {"boss_index": boss_index, **scene_raw}
+        STATE["current_scene_raw"] = scene_raw
+
+    selected = next((c for c in scene_raw["choices"] if c["id"] == choice_id), None)
+    if not selected:
+        return jsonify({"error": "Choice not found."}), 400
+
+    dp = int(selected["delta_player"]["hp"])
+    db = int(selected["delta_boss"]["hp"])
+    was_sustainable = bool(selected["is_sustainable"])
+
+    STATE["player"].hp += dp
+    boss_dict["hp"] += db
+    STATE["player"].hp = max(0, STATE["player"].hp)
+    boss_dict["hp"] = max(0, boss_dict["hp"])
+
+    if STATE["player"].hp <= 0:
+        STATE["active"] = False
+        return jsonify(
+            {
+                "outcome": "player_defeated",
+                "message": "You ran out of HP. Try again and pick more sustainable choices!",
+                "was_sustainable": was_sustainable,
+                "player_hp": STATE["player"].hp,
+                "boss": {"name": boss_dict["name"], "category": boss_dict["category"], "hp": boss_dict["hp"]},
+            }
+        )
+
+    if boss_dict["hp"] <= 0:
+        STATE["wins"] += 1
+        if STATE["wins"] >= STATE["required_wins"]:
+            STATE["active"] = False
+            return jsonify(
+                {
+                    "outcome": "victory",
+                    "message": "Victory! You defeated the bosses with sustainable choices!",
+                    "was_sustainable": was_sustainable,
+                    "wins": STATE["wins"],
+                    "required_wins": STATE["required_wins"],
+                    "player_hp": STATE["player"].hp,
+                }
+            )
+
+        STATE["current_boss_index"] = min(STATE["current_boss_index"] + 1, len(STATE["bosses"]) - 1)
+        next_boss_dict = STATE["bosses"][STATE["current_boss_index"]]
+        next_boss = Boss(**{k: next_boss_dict[k] for k in ["name", "category", "hp"]})
+        next_scene_raw = _ask_model_for_scene(next_boss, STATE["player"], difficulty)
+        STATE["current_scene_raw"] = {"boss_index": STATE["current_boss_index"], **next_scene_raw}
+        image_data_url = _get_or_generate_boss_image(next_boss_dict)
+
+        return jsonify(
+            {
+                "outcome": "boss_defeated",
+                "message": "Boss defeated! A new boss appears...",
+                "was_sustainable": was_sustainable,
+                "wins": STATE["wins"],
+                "required_wins": STATE["required_wins"],
+                "current_boss_index": STATE["current_boss_index"],
+                "player_hp": STATE["player"].hp,
+                "boss": {
+                    "name": next_boss_dict["name"],
+                    "category": next_boss_dict["category"],
+                    "hp": next_boss_dict["hp"],
+                },
+                "boss_image": image_data_url,
+                **_scene_for_client(next_scene_raw),
+            }
+        )
+
+    # Continue same boss
+    boss = Boss(**{k: boss_dict[k] for k in ["name", "category", "hp"]})
+    next_scene_raw = _ask_model_for_scene(boss, STATE["player"], difficulty)
+    STATE["current_scene_raw"] = {"boss_index": boss_index, **next_scene_raw}
+    image_data_url = _get_or_generate_boss_image(boss_dict)
+
+    return jsonify(
+        {
+            "outcome": "continue",
+            "message": "Nice choice!" if was_sustainable else "Ouch—try a more sustainable option next time!",
+            "was_sustainable": was_sustainable,
+            "wins": STATE["wins"],
+            "required_wins": STATE["required_wins"],
+            "current_boss_index": boss_index,
+            "player_hp": STATE["player"].hp,
+            "boss": {"name": boss_dict["name"], "category": boss_dict["category"], "hp": boss_dict["hp"]},
+            "boss_image": image_data_url,
+            **_scene_for_client(next_scene_raw),
+        }
+    )
+
+
+@app.route("/api/boss_image", methods=["POST"])
+def boss_image():
+    if not STATE.get("active"):
+        return jsonify({"error": "Game not started."}), 400
+
+    data = request.get_json(silent=True) or {}
+    boss_index = int(data.get("boss_index", STATE["current_boss_index"]))
+    boss_index = max(0, min(boss_index, len(STATE["bosses"]) - 1))
+    boss_dict = STATE["bosses"][boss_index]
+    return jsonify({"boss_image": _get_or_generate_boss_image(boss_dict)})
 
 # === ask_questions.py adapted === #
 @app.route("/api/questions", methods=["POST"])
@@ -252,31 +567,35 @@ def daily_questions():
     return jsonify(answers)
 
 # === facts.py adapted === #
-@app.route("/api/fact", methods=["POST"])
+@app.route("/api/fact", methods=["GET"])
 def fact():
-    data = request.json or {}
-    topic = data.get("topic", "sustainability")
-    
-    user_prompt = f"Give me a short, interesting fact about {topic}."
+    user_prompt = "Give me random fact about sustainability."
     system_prompt = """
-    You are an environmental educator. Generate a single, concise sentence (max 20 words) 
-    that teaches a specific fact about the given topic. 
-    Focus on impact and actionable knowledge.
+    Generate a random fact about touching grass time, water consumption,
+    transportation choices, or carbon footprint.
     """
+    if not client:
+        return jsonify(
+            {
+                "fact": "Did you know? Turning off the tap while brushing your teeth can save a lot of water each day!"
+            }
+        )
 
     try:
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[
+                {"role": "user", "content": user_prompt},
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
             ],
-            max_tokens=60
         )
         return jsonify({"fact": response.choices[0].message.content})
     except Exception:
-        # Fallback if API fails
-        return jsonify({"fact": "Did you know? Recycling one aluminum can saves enough energy to run a TV for three hours."})
+        return jsonify(
+            {
+                "fact": "Quick tip: Reuse what you can, recycle what you should, and reduce what you use!"
+            }
+        )
 
 if __name__ == "__main__":
     app.run(debug=True)
