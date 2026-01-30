@@ -4,9 +4,11 @@ import base64
 import json
 import os
 import random
+import threading
 import time
+from collections import deque
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Deque, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request
@@ -88,6 +90,12 @@ STATE: Dict[str, Any] = {
     "current_scene_raw": None,  # stores full model payload including deltas
     "log": [],
 }
+
+# Pre-fetch queue for background scene generation (keeps multiple scenes ready)
+_prefetch_lock = threading.Lock()
+_prefetch_queue: Deque[Dict[str, Any]] = deque()  # Queue of {"boss_index": int, ...scene_data}
+_prefetch_target = 3  # Keep this many scenes ready in the queue
+_prefetch_running = False  # Prevents multiple prefetch threads from running
 
 
 def _extract_json_object(text: str) -> Dict[str, Any]:
@@ -292,6 +300,75 @@ def _scene_for_client(scene_raw: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _prefetch_worker() -> None:
+    """Background worker that keeps the prefetch queue filled with scenes."""
+    global _prefetch_running
+
+    with _prefetch_lock:
+        if _prefetch_running:
+            return  # Another worker is already running
+        _prefetch_running = True
+
+    try:
+        while True:
+            # Check if we should stop
+            if not STATE.get("active"):
+                break
+
+            # Check queue size
+            with _prefetch_lock:
+                queue_size = len(_prefetch_queue)
+                if queue_size >= _prefetch_target:
+                    break  # Queue is full
+
+            # Generate a new scene
+            boss_index = STATE["current_boss_index"]
+            boss_dict = STATE["bosses"][boss_index]
+            boss = Boss(**{k: boss_dict[k] for k in ["name", "category", "hp"]})
+            difficulty = STATE["difficulty"]
+
+            try:
+                scene = _ask_model_for_scene(boss, STATE["player"], difficulty)
+                with _prefetch_lock:
+                    # Double-check boss hasn't changed while we were generating
+                    if STATE["current_boss_index"] == boss_index:
+                        _prefetch_queue.append({"boss_index": boss_index, **scene})
+            except Exception:
+                # Failed to generate - stop trying to avoid infinite loop on errors
+                break
+    finally:
+        with _prefetch_lock:
+            _prefetch_running = False
+
+
+def _start_prefetch() -> None:
+    """Kick off background pre-fetch worker to fill the queue."""
+    threading.Thread(target=_prefetch_worker, daemon=True).start()
+
+
+def _get_prefetched_scene(boss_index: int) -> Optional[Dict[str, Any]]:
+    """Get a pre-fetched scene from the queue if available and matches current boss."""
+    with _prefetch_lock:
+        # Find and remove the first scene that matches this boss
+        for i, scene in enumerate(_prefetch_queue):
+            if scene.get("boss_index") == boss_index:
+                del _prefetch_queue[i]
+                return scene
+        return None
+
+
+def _clear_prefetch() -> None:
+    """Clear the prefetch queue (e.g., on boss transition)."""
+    with _prefetch_lock:
+        _prefetch_queue.clear()
+
+
+def _get_queue_size() -> int:
+    """Get current number of scenes in the prefetch queue (for debugging)."""
+    with _prefetch_lock:
+        return len(_prefetch_queue)
+
+
 def _boss_image_placeholder(boss: Boss) -> str:
     initials = "".join([w[0] for w in boss.name.split()[:2]]).upper() or "B"
     svg = f"""
@@ -330,43 +407,22 @@ def _check_custom_boss_image(boss_name: str) -> Optional[str]:
     return None
 
 
-def _get_or_generate_boss_image(boss_dict: Dict[str, Any]) -> str:
-    # First, check for a custom student-uploaded image
+def _get_boss_image(boss_dict: Dict[str, Any]) -> str:
+    """Get boss image from custom uploads, with placeholder fallback."""
+    # Return cached image if available
+    if boss_dict.get("image_data_url"):
+        return boss_dict["image_data_url"]
+    
+    # Check for custom student-uploaded image
     custom_image = _check_custom_boss_image(boss_dict.get("name", ""))
     if custom_image:
         boss_dict["image_data_url"] = custom_image
         return custom_image
     
-    if boss_dict.get("image_data_url"):
-        return boss_dict["image_data_url"]
-
+    # Fallback to placeholder if no custom image
     boss = Boss(**{k: boss_dict.get(k) for k in ["name", "category", "hp"]})
-    if not client:
-        boss_dict["image_data_url"] = _boss_image_placeholder(boss)
-        return boss_dict["image_data_url"]
-
-    prompt = (
-        "Create a kid-friendly, Pokemon-style boss character portrait. "
-        "It should look like a cute-but-intimidating villain. "
-        "No words or text in the image. "
-        f"Boss name: {boss.name}. "
-        f"Theme: {boss.category}. "
-        "Clean simple background, bright colors, high contrast."
-    )
-
-    try:
-        img = client.images.generate(
-            model="gpt-image-1",
-            prompt=prompt,
-            size="512x512",
-            response_format="b64_json",
-        )
-        b64 = img.data[0].b64_json
-        boss_dict["image_data_url"] = f"data:image/png;base64,{b64}"
-        return boss_dict["image_data_url"]
-    except Exception:
-        boss_dict["image_data_url"] = _boss_image_placeholder(boss)
-        return boss_dict["image_data_url"]
+    boss_dict["image_data_url"] = _boss_image_placeholder(boss)
+    return boss_dict["image_data_url"]
 
 @app.route("/")
 def index():
@@ -402,13 +458,19 @@ def start_game():
         }
     )
 
+    # Clear any stale prefetch from previous game and start filling queue immediately
+    # This runs IN PARALLEL with first scene generation below, so by the time
+    # the loading screen finishes, we may already have 2-3 scenes queued up
+    _clear_prefetch()
+    _start_prefetch()
+
     # Pre-load first boss scene and image so the UI feels instant.
     boss_dict = STATE["bosses"][STATE["current_boss_index"]]
     boss = Boss(**{k: boss_dict[k] for k in ["name", "category", "hp"]})
     scene_raw = _ask_model_for_scene(boss, STATE["player"], difficulty)
     STATE["current_scene_raw"] = {"boss_index": STATE["current_boss_index"], **scene_raw}
 
-    image_data_url = _get_or_generate_boss_image(boss_dict)
+    image_data_url = _get_boss_image(boss_dict)
 
     return jsonify(
         {
@@ -442,7 +504,10 @@ def scene():
     scene_raw = _ask_model_for_scene(boss, STATE["player"], difficulty)
     STATE["current_scene_raw"] = {"boss_index": boss_index, **scene_raw}
 
-    image_data_url = _get_or_generate_boss_image(boss_dict)
+    image_data_url = _get_boss_image(boss_dict)
+
+    # Start pre-fetching next scene in background
+    _start_prefetch()
 
     return jsonify(
         {
@@ -519,12 +584,18 @@ def apply_choice():
                 }
             )
 
+        # Clear stale prefetch (it was for the old boss)
+        _clear_prefetch()
+
         STATE["current_boss_index"] = min(STATE["current_boss_index"] + 1, len(STATE["bosses"]) - 1)
         next_boss_dict = STATE["bosses"][STATE["current_boss_index"]]
         next_boss = Boss(**{k: next_boss_dict[k] for k in ["name", "category", "hp"]})
         next_scene_raw = _ask_model_for_scene(next_boss, STATE["player"], difficulty)
         STATE["current_scene_raw"] = {"boss_index": STATE["current_boss_index"], **next_scene_raw}
-        image_data_url = _get_or_generate_boss_image(next_boss_dict)
+        image_data_url = _get_boss_image(next_boss_dict)
+
+        # Start pre-fetching next scene for the new boss
+        _start_prefetch()
 
         return jsonify(
             {
@@ -545,11 +616,20 @@ def apply_choice():
             }
         )
 
-    # Continue same boss
+    # Continue same boss - try to use pre-fetched scene for instant response
     boss = Boss(**{k: boss_dict[k] for k in ["name", "category", "hp"]})
-    next_scene_raw = _ask_model_for_scene(boss, STATE["player"], difficulty)
-    STATE["current_scene_raw"] = {"boss_index": boss_index, **next_scene_raw}
-    image_data_url = _get_or_generate_boss_image(boss_dict)
+    next_scene_raw = _get_prefetched_scene(boss_index)
+    if not next_scene_raw:
+        # Fallback to sync generation if prefetch not ready
+        next_scene_raw = _ask_model_for_scene(boss, STATE["player"], difficulty)
+        next_scene_raw = {"boss_index": boss_index, **next_scene_raw}
+    STATE["current_scene_raw"] = next_scene_raw
+    
+    # Reuse cached image - boss hasn't changed, no need to re-fetch
+    image_data_url = boss_dict.get("image_data_url") or _get_boss_image(boss_dict)
+
+    # Start pre-fetching next scene in background
+    _start_prefetch()
 
     return jsonify(
         {
@@ -576,7 +656,7 @@ def boss_image():
     boss_index = int(data.get("boss_index", STATE["current_boss_index"]))
     boss_index = max(0, min(boss_index, len(STATE["bosses"]) - 1))
     boss_dict = STATE["bosses"][boss_index]
-    return jsonify({"boss_image": _get_or_generate_boss_image(boss_dict)})
+    return jsonify({"boss_image": _get_boss_image(boss_dict)})
 
 
 @app.route("/api/boss_list", methods=["GET"])
