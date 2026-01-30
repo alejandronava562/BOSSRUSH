@@ -94,6 +94,18 @@
             <div class="bar"><div id="player_hp_bar" class="bar-fill player"></div></div>
             <span id="player_hp" class="bar-value"></span>
           </div>
+          <div class="player-stats">
+            <div class="stat-item" style="display: none;">
+              <span class="stat-icon">🛡️</span>
+              <span class="stat-label">Shield:</span>
+              <span id="player_shield" class="stat-value">0</span>
+            </div>
+            <div class="stat-item" style="display: none;">
+              <span class="stat-icon">⚔️</span>
+              <span class="stat-label">Attack:</span>
+              <span id="player_attack" class="stat-value">+0</span>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -107,6 +119,17 @@
         <p id="sustainability_fact" class="muted"></p>
       </section>
     </section>
+
+    <!-- Reward Selection Modal -->
+    <div id="reward_modal" class="modal hidden" aria-hidden="true">
+      <div class="modal-content reward-modal">
+        <div class="reward-header">
+          <h2>🎉 Boss Defeated!</h2>
+          <p id="reward_message">Choose your reward:</p>
+        </div>
+        <div id="reward_options" class="reward-options"></div>
+      </div>
+    </div>
   </main>
 
   <script src="{{url_for('static', filename='script.js')}}"></script>

@@ -18,11 +18,16 @@ const bossImage = document.getElementById("boss_image");
 
 const playerHpText = document.getElementById("player_hp");
 const playerHpBar = document.getElementById("player_hp_bar");
+const playerShieldText = document.getElementById("player_shield");
+const playerAttackText = document.getElementById("player_attack");
 
 const sceneText = document.getElementById("scene_text");
 const choicesEl = document.getElementById("choices");
 const turnFeedback = document.getElementById("turn_feedback");
 const sustainabilityFact = document.getElementById("sustainability_fact");
+const rewardModal = document.getElementById("reward_modal");
+const rewardOptions = document.getElementById("reward_options");
+const rewardMessage = document.getElementById("reward_message");
 
 // Loading screen elements
 const loadingTitle = document.getElementById("loading_title");
@@ -226,6 +231,131 @@ function setBars({ playerHp, bossHp }) {
   bossHpBar.style.width = `${bossPct}%`;
 }
 
+function setPlayerStats(data, animate = false) {
+  if (playerShieldText && data.player_shield != null) {
+    const oldValue = parseInt(playerShieldText.textContent) || 0;
+    playerShieldText.textContent = data.player_shield;
+    playerShieldText.parentElement.style.display = data.player_shield > 0 ? "flex" : "none";
+    
+    // Animate if value increased
+    if (animate && data.player_shield > oldValue) {
+      playerShieldText.parentElement.classList.add("stat-pulse");
+      setTimeout(() => playerShieldText.parentElement.classList.remove("stat-pulse"), 600);
+    }
+  }
+  if (playerAttackText && data.player_attack_bonus != null) {
+    const oldValue = parseInt(playerAttackText.textContent) || 0;
+    playerAttackText.textContent = `+${data.player_attack_bonus}`;
+    playerAttackText.parentElement.style.display = data.player_attack_bonus > 0 ? "flex" : "none";
+    
+    // Animate if value increased
+    if (animate && data.player_attack_bonus > oldValue) {
+      playerAttackText.parentElement.classList.add("stat-pulse");
+      setTimeout(() => playerAttackText.parentElement.classList.remove("stat-pulse"), 600);
+    }
+  }
+  if (data.player_max_hp) {
+    maxPlayerHp = Math.max(maxPlayerHp, data.player_max_hp);
+  }
+}
+
+function showEquippedNotification(rewardId, message) {
+  // Create floating notification
+  const notification = document.createElement("div");
+  notification.className = "equipped-notification";
+  
+  const icon = rewardId === "shield" ? "🛡️" : rewardId === "attack" ? "⚔️" : "❤️";
+  notification.innerHTML = `<span class="equipped-icon">${icon}</span><span class="equipped-text">${message}</span>`;
+  
+  document.body.appendChild(notification);
+  
+  // Trigger animation
+  setTimeout(() => notification.classList.add("show"), 10);
+  
+  // Remove after animation
+  setTimeout(() => {
+    notification.classList.remove("show");
+    setTimeout(() => notification.remove(), 300);
+  }, 2500);
+}
+
+function showRewardModal(data) {
+  if (!rewardModal || !rewardOptions) return;
+  
+  rewardModal.classList.remove("hidden");
+  rewardOptions.innerHTML = "";
+  
+  if (rewardMessage) {
+    rewardMessage.textContent = data.message || "Choose your reward!";
+  }
+  
+  const rewards = data.rewards || [];
+  rewards.forEach((reward) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "reward-btn";
+    btn.innerHTML = `
+      <span class="reward-icon">${reward.icon}</span>
+      <span class="reward-name">${reward.name}</span>
+      <span class="reward-desc">${reward.description}</span>
+    `;
+    btn.addEventListener("click", () => claimReward(reward.id));
+    rewardOptions.appendChild(btn);
+  });
+}
+
+function hideRewardModal() {
+  if (rewardModal) {
+    rewardModal.classList.add("hidden");
+  }
+}
+
+async function claimReward(rewardId) {
+  if (inFlight) return;
+  inFlight = true;
+  
+  // Disable reward buttons
+  const btns = rewardOptions?.querySelectorAll("button") || [];
+  btns.forEach(b => b.disabled = true);
+  
+  try {
+    const res = await fetch("/api/claim_reward", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reward_id: rewardId }),
+    });
+    
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data?.error || "Failed to claim reward.");
+    }
+    
+    hideRewardModal();
+    
+    // Update max HP if needed
+    if (data.player_max_hp) maxPlayerHp = data.player_max_hp;
+    
+    // Show equipped notification
+    showEquippedNotification(rewardId, data.reward_message || "Reward equipped!");
+    
+    // Update stats with animation
+    setPlayerStats(data, true);
+    
+    // Render next boss
+    renderGame(data);
+    
+    // Load a fact for the new boss
+    await maybeLoadFact();
+    
+  } catch (err) {
+    console.error(err);
+    if (turnFeedback) turnFeedback.textContent = "Failed to claim reward. Try again.";
+    btns.forEach(b => b.disabled = false);
+  } finally {
+    inFlight = false;
+  }
+}
+
 function setChoices(choices) {
   choicesEl.innerHTML = "";
   (choices ?? []).forEach((c) => {
@@ -269,6 +399,7 @@ function renderGameData(data) {
     if (sustainabilityFact) sustainabilityFact.textContent = "";
   }
   setBars({ playerHp: data.player_hp, bossHp: boss.hp });
+  setPlayerStats(data);
 
   sceneText.textContent = data.scene ?? "...";
   setChoices(data.choices ?? []);
@@ -313,6 +444,9 @@ async function applyChoice(choiceId) {
     outcome = data.outcome ?? null;
     const message = data.message ?? "";
 
+    // Update player stats
+    setPlayerStats(data);
+
     if (outcome === "victory" || outcome === "player_defeated") {
       setDisabledChoices(true);
       restartBtn.classList.remove("hidden");
@@ -322,14 +456,19 @@ async function applyChoice(choiceId) {
       return;
     }
 
-    // boss_defeated or continue both include next scene payload
+    if (outcome === "boss_defeated_choose_reward") {
+      // Show reward selection modal
+      setDisabledChoices(true);
+      sceneText.textContent = "Victory! The boss has been defeated!";
+      if (turnFeedback) turnFeedback.textContent = "";
+      showRewardModal(data);
+      return;
+    }
+
+    // continue - includes next scene payload
     if (data.player_hp != null) maxPlayerHp = Math.max(maxPlayerHp, Number(data.player_hp) || 1);
     renderGame(data);
     if (turnFeedback) turnFeedback.textContent = message;
-
-    if (outcome === "boss_defeated") {
-      await maybeLoadFact();
-    }
   } catch (err) {
     console.error(err);
     if (turnFeedback) turnFeedback.textContent = "Something went wrong. Try again.";

@@ -26,6 +26,9 @@ app = Flask(__name__)
 class Player:
     hp: int
     turn: int = 1
+    shield: int = 0        # Reduces incoming damage
+    attack_bonus: int = 0  # Extra damage dealt to bosses
+    max_hp: int = 7        # Track max HP for healing rewards
 
 
 @dataclass
@@ -451,9 +454,10 @@ def start_game():
             "required_wins": settings["required_wins"],
             "wins": 0,
             "current_boss_index": 0,
-            "player": Player(hp=settings["player_hp"]),
+            "player": Player(hp=settings["player_hp"], max_hp=settings["player_hp"]),
             "bosses": bosses,
             "current_scene_raw": None,
+            "pending_reward": False,  # True when player needs to choose a reward
             "log": [],
         }
     )
@@ -481,11 +485,49 @@ def start_game():
             "wins": STATE["wins"],
             "current_boss_index": STATE["current_boss_index"],
             "player_hp": STATE["player"].hp,
+            "player_max_hp": STATE["player"].max_hp,
+            "player_shield": STATE["player"].shield,
+            "player_attack_bonus": STATE["player"].attack_bonus,
             "boss": {"name": boss_dict["name"], "category": boss_dict["category"], "hp": boss_dict["hp"]},
             "boss_image": image_data_url,
             **_scene_for_client(scene_raw),
         }
     )
+
+
+def _get_player_stats() -> Dict[str, Any]:
+    """Helper to get current player stats for API responses."""
+    return {
+        "player_hp": STATE["player"].hp,
+        "player_max_hp": STATE["player"].max_hp,
+        "player_shield": STATE["player"].shield,
+        "player_attack_bonus": STATE["player"].attack_bonus,
+    }
+
+
+def _get_reward_options() -> List[Dict[str, Any]]:
+    """Generate the three reward options for defeating a boss."""
+    return [
+        {
+            "id": "shield",
+            "name": "Shield Boost",
+            "description": "+1 Shield (reduces damage taken)",
+            "icon": "🛡️",
+        },
+        {
+            "id": "health",
+            "name": "Health Restore",
+            "description": f"Restore 3 HP (max {STATE['player'].max_hp})",
+            "icon": "❤️",
+        },
+        {
+            "id": "attack",
+            "name": "Attack Power",
+            "description": "+2 Attack (deal more damage to bosses)",
+            "icon": "⚔️",
+        },
+    ]
+
 
 @app.route("/api/scene", methods=["POST"])
 def scene():
@@ -516,9 +558,9 @@ def scene():
             "required_wins": STATE["required_wins"],
             "wins": STATE["wins"],
             "current_boss_index": boss_index,
-            "player_hp": STATE["player"].hp,
             "boss": {"name": boss_dict["name"], "category": boss_dict["category"], "hp": boss_dict["hp"]},
             "boss_image": image_data_url,
+            **_get_player_stats(),
             **_scene_for_client(scene_raw),
         }
     )
@@ -527,6 +569,9 @@ def scene():
 def apply_choice():
     if not STATE.get("active"):
         return jsonify({"error": "Game not started."}), 400
+    
+    if STATE.get("pending_reward"):
+        return jsonify({"error": "Please claim your reward first!"}), 400
 
     data = request.get_json(silent=True) or {}
     choice_id = str(data.get("choice_id", "")).strip().upper()
@@ -552,9 +597,17 @@ def apply_choice():
     db = int(selected["delta_boss"]["hp"])
     was_sustainable = bool(selected["is_sustainable"])
 
+    # Apply shield: reduces incoming damage (if dp is negative, shield makes it less negative)
+    if dp < 0:
+        dp = min(0, dp + STATE["player"].shield)  # Shield can't make damage positive
+    
+    # Apply attack bonus: increases damage dealt to boss (make db more negative)
+    if db < 0:
+        db = db - STATE["player"].attack_bonus  # More negative = more damage
+
     STATE["player"].hp += dp
     boss_dict["hp"] += db
-    STATE["player"].hp = max(0, STATE["player"].hp)
+    STATE["player"].hp = max(0, min(STATE["player"].hp, STATE["player"].max_hp))  # Clamp to max
     boss_dict["hp"] = max(0, boss_dict["hp"])
 
     if STATE["player"].hp <= 0:
@@ -564,8 +617,8 @@ def apply_choice():
                 "outcome": "player_defeated",
                 "message": "You ran out of HP. Try again and pick more sustainable choices!",
                 "was_sustainable": was_sustainable,
-                "player_hp": STATE["player"].hp,
                 "boss": {"name": boss_dict["name"], "category": boss_dict["category"], "hp": boss_dict["hp"]},
+                **_get_player_stats(),
             }
         )
 
@@ -576,43 +629,26 @@ def apply_choice():
             return jsonify(
                 {
                     "outcome": "victory",
-                    "message": "Victory! You defeated the bosses with sustainable choices!",
+                    "message": "Victory! You defeated all the bosses with sustainable choices!",
                     "was_sustainable": was_sustainable,
                     "wins": STATE["wins"],
                     "required_wins": STATE["required_wins"],
-                    "player_hp": STATE["player"].hp,
+                    **_get_player_stats(),
                 }
             )
 
-        # Clear stale prefetch (it was for the old boss)
-        _clear_prefetch()
-
-        STATE["current_boss_index"] = min(STATE["current_boss_index"] + 1, len(STATE["bosses"]) - 1)
-        next_boss_dict = STATE["bosses"][STATE["current_boss_index"]]
-        next_boss = Boss(**{k: next_boss_dict[k] for k in ["name", "category", "hp"]})
-        next_scene_raw = _ask_model_for_scene(next_boss, STATE["player"], difficulty)
-        STATE["current_scene_raw"] = {"boss_index": STATE["current_boss_index"], **next_scene_raw}
-        image_data_url = _get_boss_image(next_boss_dict)
-
-        # Start pre-fetching next scene for the new boss
-        _start_prefetch()
-
+        # Boss defeated but more to go - offer reward choice!
+        STATE["pending_reward"] = True
+        
         return jsonify(
             {
-                "outcome": "boss_defeated",
-                "message": "Boss defeated! A new boss appears...",
+                "outcome": "boss_defeated_choose_reward",
+                "message": f"You defeated {boss_dict['name']}! Choose your reward:",
                 "was_sustainable": was_sustainable,
                 "wins": STATE["wins"],
                 "required_wins": STATE["required_wins"],
-                "current_boss_index": STATE["current_boss_index"],
-                "player_hp": STATE["player"].hp,
-                "boss": {
-                    "name": next_boss_dict["name"],
-                    "category": next_boss_dict["category"],
-                    "hp": next_boss_dict["hp"],
-                },
-                "boss_image": image_data_url,
-                **_scene_for_client(next_scene_raw),
+                "rewards": _get_reward_options(),
+                **_get_player_stats(),
             }
         )
 
@@ -639,9 +675,77 @@ def apply_choice():
             "wins": STATE["wins"],
             "required_wins": STATE["required_wins"],
             "current_boss_index": boss_index,
-            "player_hp": STATE["player"].hp,
             "boss": {"name": boss_dict["name"], "category": boss_dict["category"], "hp": boss_dict["hp"]},
             "boss_image": image_data_url,
+            **_get_player_stats(),
+            **_scene_for_client(next_scene_raw),
+        }
+    )
+
+
+@app.route("/api/claim_reward", methods=["POST"])
+def claim_reward():
+    """Player claims their reward after defeating a boss."""
+    if not STATE.get("active"):
+        return jsonify({"error": "Game not started."}), 400
+    
+    if not STATE.get("pending_reward"):
+        return jsonify({"error": "No reward pending."}), 400
+
+    data = request.get_json(silent=True) or {}
+    reward_id = str(data.get("reward_id", "")).strip().lower()
+    
+    if reward_id not in {"shield", "health", "attack"}:
+        return jsonify({"error": "Invalid reward. Choose shield, health, or attack."}), 400
+
+    # Apply the chosen reward
+    reward_message = ""
+    if reward_id == "shield":
+        STATE["player"].shield += 1
+        reward_message = f"Shield increased to {STATE['player'].shield}! You now take less damage."
+    elif reward_id == "health":
+        old_hp = STATE["player"].hp
+        STATE["player"].hp = min(STATE["player"].hp + 3, STATE["player"].max_hp)
+        healed = STATE["player"].hp - old_hp
+        reward_message = f"Restored {healed} HP! (Now at {STATE['player'].hp}/{STATE['player'].max_hp})"
+    elif reward_id == "attack":
+        STATE["player"].attack_bonus += 2
+        reward_message = f"Attack power increased to +{STATE['player'].attack_bonus}! You now deal more damage."
+
+    # Clear pending reward
+    STATE["pending_reward"] = False
+
+    # Now advance to next boss
+    _clear_prefetch()
+    
+    STATE["current_boss_index"] = min(STATE["current_boss_index"] + 1, len(STATE["bosses"]) - 1)
+    next_boss_dict = STATE["bosses"][STATE["current_boss_index"]]
+    next_boss = Boss(**{k: next_boss_dict[k] for k in ["name", "category", "hp"]})
+    difficulty = STATE["difficulty"]
+    
+    next_scene_raw = _ask_model_for_scene(next_boss, STATE["player"], difficulty)
+    STATE["current_scene_raw"] = {"boss_index": STATE["current_boss_index"], **next_scene_raw}
+    image_data_url = _get_boss_image(next_boss_dict)
+
+    # Start pre-fetching for the new boss
+    _start_prefetch()
+
+    return jsonify(
+        {
+            "outcome": "reward_claimed",
+            "reward_id": reward_id,
+            "reward_message": reward_message,
+            "message": f"A new challenger appears: {next_boss_dict['name']}!",
+            "wins": STATE["wins"],
+            "required_wins": STATE["required_wins"],
+            "current_boss_index": STATE["current_boss_index"],
+            "boss": {
+                "name": next_boss_dict["name"],
+                "category": next_boss_dict["category"],
+                "hp": next_boss_dict["hp"],
+            },
+            "boss_image": image_data_url,
+            **_get_player_stats(),
             **_scene_for_client(next_scene_raw),
         }
     )
