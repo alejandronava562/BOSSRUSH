@@ -526,6 +526,12 @@ def _get_reward_options() -> List[Dict[str, Any]]:
             "description": "+2 Attack (deal more damage to bosses)",
             "icon": "⚔️",
         },
+        {
+            "id": "Food",
+            "name": "Crispy Noodles",
+            "description": "Plus 25 percent attack Plus 25% Deffense Plus 25% Special Deffense Plus 25% Special Attack, Unlock way of Eco Heaven",
+            "icon": "⚔️",
+        },
     ]
 
 
