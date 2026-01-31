@@ -544,6 +544,12 @@ def _get_reward_options() -> List[Dict[str, Any]]:
             "description": "Instant kill with force field for 3 blows ",
             "icon": "🪄",
         },
+        {
+            "id": "Magic/Spell",
+            "name": "Eco Blaster",
+            "description": "Instant kills any boss. Need to kill 5 Hard Bosses in order to obtain.",
+            "icon": "𒄉",
+        }
     ]
 
 
