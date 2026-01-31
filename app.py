@@ -511,19 +511,19 @@ def _get_reward_options() -> List[Dict[str, Any]]:
         {
             "id": "shield",
             "name": "Shield Boost",
-            "description": "+1 Shield (reduces damage taken)",
+            "description": "20 percent less damage (reduces damage taken)",
             "icon": "🛡️",
         },
         {
             "id": "health",
             "name": "Health Restore",
-            "description": f"Restore 3 HP (max {STATE['player'].max_hp})",
+            "description": f"Restore max HP (max {STATE['player'].max_hp})",
             "icon": "❤️",
         },
         {
             "id": "attack",
             "name": "Attack Power",
-            "description": "+2 Attack (deal more damage to bosses)",
+            "description": "+3 Attack (deals 3 more damage)",
             "icon": "⚔️",
         },
         {
