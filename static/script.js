@@ -45,27 +45,27 @@ let typewriterTimeout = null;
 // Story segments for the loading screen
 const STORY_SEGMENTS = [
   {
-    text: "STORY_SEGEMENT 1 GOES HERE",
+    text: "Once upon a time, a powerful necromancer released environmental disasters as monsters that could attack the world. ",
     status: "Scanning threat levels...",
     progress: 15
   },
   {
-    text: "STORY_SEGEMENT 2 GOES HERE",
-    status: "Analyzing enemy patterns...",
+    text: "This was because he was evil and displeased how well the humans were living. These monsters drove chaos throughout the world and made the world unsustainable, and eventually, the humans chose one brave player to face the monsters. “YOU!",
+      status: "Analyzing enemy patterns...",
     progress: 35
   },
   {
-    text: "STORY_SEGEMENT 3 GOES HERE",
+    text: "You also notice that every time you start to do an environmentally friendly task, you gain stronger powers, motivating you even more to complete sustainable tasks",
     status: "Calibrating sustainable attacks...",
     progress: 55
   },
   {
-    text: "STORY_SEGEMENT 4 GOES HERE",
+    text: "Finally, you reach an extremely difficult task(ridding the world of all unsustainable minions) from the leaders of the world, or the final task. You must use all the knowledge that you have gained along the way to complete this. With your final attack, you unleash the full powers of every environmental attack you have, and you complete the task of ridding the world of unsustainable minions.",
     status: "Preparing battle arena...",
     progress: 75
   },
   {
-    text: "STORY_SEGEMENT 5 GOES HERE",
+    text: "You trained hard. You encountered many hardships, but eventually, you succeeded in your training. Now it is time to fight the bosses.",
     status: "Loading first boss...",
     progress: 90
   }
