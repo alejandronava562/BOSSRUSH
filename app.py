@@ -538,6 +538,12 @@ def _get_reward_options() -> List[Dict[str, Any]]:
             "description": "Takes 50 percent less damage ",
             "icon": "🥻",
         },
+        {
+            "id": "Magic/Spell",
+            "name": "Gateway Of Living Grace",
+            "description": "Instant kill with force field for 3 blows ",
+            "icon": "🪄",
+        },
     ]
 
 
