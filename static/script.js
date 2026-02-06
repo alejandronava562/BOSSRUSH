@@ -28,6 +28,18 @@ const sustainabilityFact = document.getElementById("sustainability_fact");
 const rewardModal = document.getElementById("reward_modal");
 const rewardOptions = document.getElementById("reward_options");
 const rewardMessage = document.getElementById("reward_message");
+const victoryScreen = document.getElementById("victory_screen");
+const defeatScreen = document.getElementById("defeat_screen");
+const damageOverlay = document.getElementById("damage_overlay");
+
+// Item bar elements
+const itemBar = document.getElementById("item_bar");
+const itemSlots = {
+  noodles:     { btn: document.getElementById("item_noodles"),      count: document.getElementById("item_noodles_count") },
+  aegis:       { btn: document.getElementById("item_aegis"),        count: document.getElementById("item_aegis_count") },
+  spell:       { btn: document.getElementById("item_spell"),        count: document.getElementById("item_spell_count") },
+  eco_blaster: { btn: document.getElementById("item_eco_blaster"),  count: document.getElementById("item_eco_blaster_count") },
+};
 
 // Loading screen elements
 const loadingTitle = document.getElementById("loading_title");
@@ -41,6 +53,7 @@ let maxBossHp = 1;
 let inFlight = false;
 let currentBossName = null;
 let typewriterTimeout = null;
+let prefetchInterval = null;  // Background prefetch polling
 
 // Story segments for the loading screen
 const STORY_SEGMENTS = [
@@ -50,7 +63,7 @@ const STORY_SEGMENTS = [
     progress: 15
   },
   {
-    text: "This was because he was evil and displeased how well the humans were living. These monsters drove chaos throughout the world and made the world unsustainable, and eventually, the humans chose one brave player to face the monsters. “YOU!",
+    text: "This was because he was evil and displeased how well the humans were living. These monsters drove chaos throughout the world and made the world unsustainable, and eventually, the humans chose one brave player to face the monsters. YOU!",
       status: "Analyzing enemy patterns...",
     progress: 35
   },
@@ -60,12 +73,12 @@ const STORY_SEGMENTS = [
     progress: 55
   },
   {
-    text: "Finally, you reach an extremely difficult task(ridding the world of all unsustainable minions) from the leaders of the world, or the final task. You must use all the knowledge that you have gained along the way to complete this. With your final attack, you unleash the full powers of every environmental attack you have, and you complete the task of ridding the world of unsustainable minions.",
+    text: "Finally, you reach an extremely difficult task(ridding the world of all unsustainable minions) from the leaders of the world, or the final task. You must use all the knowledge that you have gained along the way to complete this. With your attacks, you unleash the full powers of every environmental attack you have, and you become a master of ridding the world of unsustainable minions.",
     status: "Preparing battle arena...",
     progress: 75
   },
   {
-    text: "You trained hard. You encountered many hardships, but eventually, you succeeded in your training. Now it is time to fight the bosses.",
+    text: "You fought hard. You encountered many hardships. but one day, you hear a giant rumble... Now it is time to fight the final pollution bosses.",
     status: "Loading first boss...",
     progress: 90
   }
@@ -74,16 +87,22 @@ const STORY_SEGMENTS = [
 function typeWriter(element, text, speed = 30) {
   return new Promise((resolve) => {
     let i = 0;
-    element.innerHTML = '<span class="cursor"></span>';
+    // Use a text node + cursor span to avoid rebuilding innerHTML every frame
+    const textNode = document.createTextNode("");
+    const cursor = document.createElement("span");
+    cursor.className = "cursor";
+    element.innerHTML = "";
+    element.appendChild(textNode);
+    element.appendChild(cursor);
     
     function type() {
       if (i < text.length) {
-        element.innerHTML = text.substring(0, i + 1) + '<span class="cursor"></span>';
+        textNode.textContent = text.substring(0, i + 1);
         i++;
         typewriterTimeout = setTimeout(type, speed);
       } else {
         setTimeout(() => {
-          element.innerHTML = text;
+          cursor.remove();
           resolve();
         }, 500);
       }
@@ -109,6 +128,8 @@ async function runStorySequence() {
   for (const segment of STORY_SEGMENTS) {
     loadingStatus.textContent = segment.status;
     loadingBarFill.style.width = segment.progress + "%";
+    // Trigger prefetch during each segment to fill the scene queue
+    triggerPrefetch();
     await typeWriter(storyText, segment.text, 25);
     await new Promise(r => setTimeout(r, 800));
   }
@@ -209,6 +230,14 @@ restartBtn?.addEventListener("click", () => {
   window.location.reload();
 });
 
+document.getElementById("victoryRestartBtn")?.addEventListener("click", () => {
+  window.location.reload();
+});
+
+document.getElementById("defeatRestartBtn")?.addEventListener("click", () => {
+  window.location.reload();
+});
+
 function showGameScreen() {
   startScreen.classList.add("hidden");
   loadingScreen.classList.add("hidden");
@@ -257,6 +286,167 @@ function setPlayerStats(data, animate = false) {
   if (data.player_max_hp) {
     maxPlayerHp = Math.max(maxPlayerHp, data.player_max_hp);
   }
+  // Always sync item bar with latest data
+  updateItemBar(data);
+}
+
+/**
+ * Update the item bar to reflect current charges from server data.
+ * Shows/hides each slot and the bar itself.
+ */
+function updateItemBar(data) {
+  const charges = {
+    noodles:     data.player_noodles_charges     ?? 0,
+    aegis:       data.player_aegis_charges       ?? 0,
+    spell:       data.player_spell_charges       ?? 0,
+    eco_blaster: data.player_eco_blaster_uses    ?? 0,
+  };
+
+  let anyVisible = false;
+
+  for (const [id, slot] of Object.entries(itemSlots)) {
+    const c = charges[id] || 0;
+    if (!slot.btn) continue;
+
+    if (c > 0) {
+      slot.btn.classList.remove("hidden");
+      slot.btn.disabled = false;
+      slot.count.textContent = c;
+      anyVisible = true;
+
+      // Disable aegis button if already permanently active
+      if (id === "aegis" && data.player_aegis_active) {
+        slot.btn.classList.add("item-active-permanent");
+        slot.btn.disabled = true;
+        slot.btn.title = "Aegis already active";
+      } else {
+        slot.btn.classList.remove("item-active-permanent");
+      }
+    } else {
+      // Keep showing aegis slot if permanently active (greyed visual)
+      if (id === "aegis" && data.player_aegis_active) {
+        slot.btn.classList.remove("hidden");
+        slot.btn.classList.add("item-active-permanent");
+        slot.btn.disabled = true;
+        slot.count.textContent = "✓";
+        anyVisible = true;
+      } else {
+        slot.btn.classList.add("hidden");
+      }
+    }
+  }
+
+  // Show/hide force field turn indicator on spell button
+  if (data.player_force_field_turns > 0 && itemSlots.spell.btn) {
+    itemSlots.spell.btn.classList.add("item-timed-active");
+    itemSlots.spell.btn.dataset.turns = data.player_force_field_turns;
+  } else if (itemSlots.spell.btn) {
+    itemSlots.spell.btn.classList.remove("item-timed-active");
+  }
+
+  if (itemBar) {
+    itemBar.classList.toggle("hidden", !anyVisible);
+  }
+}
+
+/**
+ * Activate an item — call backend, play animation, update UI.
+ */
+let itemInFlight = false;
+async function useItem(itemId) {
+  if (itemInFlight || inFlight) return;
+  itemInFlight = true;
+
+  // Disable the clicked button immediately
+  const slot = itemSlots[itemId];
+  if (slot?.btn) slot.btn.disabled = true;
+
+  try {
+    const res = await fetch("/api/use_item", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ item_id: itemId }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data?.error || "Failed to use item.");
+    }
+
+    // Play item activation animation
+    playItemAnimation(itemId, data);
+
+    // Update stats & item bar
+    setPlayerStats(data, true);
+
+    // If eco_blaster removed a choice, update choices
+    if (itemId === "eco_blaster" && data.removed_choice_id) {
+      const removedBtn = choicesEl.querySelector(`[data-choice-id="${data.removed_choice_id}"]`);
+      if (removedBtn) {
+        removedBtn.classList.add("choice-removed");
+        setTimeout(() => removedBtn.remove(), 500);
+      }
+      // Also update the choices with the new scene data if provided
+      if (data.choices) {
+        setTimeout(() => setChoices(data.choices), 550);
+      }
+    }
+
+    // Show notification
+    showEquippedNotification(itemId, data.message || "Item activated!");
+
+    if (turnFeedback) turnFeedback.textContent = data.message || "";
+
+  } catch (err) {
+    console.error(err);
+    if (turnFeedback) turnFeedback.textContent = err.message || "Failed to use item.";
+    // Re-enable button on error
+    if (slot?.btn) slot.btn.disabled = false;
+  } finally {
+    itemInFlight = false;
+  }
+}
+
+/**
+ * Play a visual animation for each item type.
+ */
+function playItemAnimation(itemId, data) {
+  const overlay = damageOverlay;
+  if (!overlay) return;
+
+  // Create a full-screen fx element
+  const fx = document.createElement("div");
+  fx.className = `item-fx item-fx-${itemId}`;
+
+  switch (itemId) {
+    case "noodles":
+      fx.innerHTML = `<div class="fx-icon">🍜</div><div class="fx-label">+3 ATK · +10% CRIT</div>`;
+      flashPanel(".player-panel", "boss-damage"); // green flash on player
+      break;
+    case "aegis":
+      fx.innerHTML = `<div class="fx-icon">🥻</div><div class="fx-label">AEGIS SHIELD ON</div>`;
+      flashPanel(".player-panel", "aegis-flash");
+      break;
+    case "spell":
+      fx.innerHTML = `<div class="fx-icon">🪄</div><div class="fx-label">FORCE FIELD · 3 TURNS</div>`;
+      flashPanel(".player-panel", "spell-flash");
+      break;
+    case "eco_blaster":
+      fx.innerHTML = `<div class="fx-icon">𒄉</div><div class="fx-label">BLAST!</div>`;
+      flashPanel(".choices-grid", "blast-flash");
+      break;
+  }
+
+  overlay.appendChild(fx);
+  fx.addEventListener("animationend", () => fx.remove());
+  setTimeout(() => fx.remove(), 1600); // fallback cleanup
+}
+
+// Attach click handlers to item slots
+for (const [id, slot] of Object.entries(itemSlots)) {
+  if (slot.btn) {
+    slot.btn.addEventListener("click", () => useItem(id));
+  }
 }
 
 function showEquippedNotification(rewardId, message) {
@@ -264,7 +454,16 @@ function showEquippedNotification(rewardId, message) {
   const notification = document.createElement("div");
   notification.className = "equipped-notification";
   
-  const icon = rewardId === "shield" ? "🛡️" : rewardId === "attack" ? "⚔️" : "❤️";
+  const iconMap = {
+    shield_boost: "🛡️", shield: "🛡️",
+    attack_power: "⚔️", attack: "⚔️",
+    health_restore: "❤️",
+    noodles: "🍜",
+    aegis: "🥻",
+    spell: "🪄",
+    eco_blaster: "𒄉",
+  };
+  const icon = iconMap[rewardId] || "✨";
   notification.innerHTML = `<span class="equipped-icon">${icon}</span><span class="equipped-text">${message}</span>`;
   
   document.body.appendChild(notification);
@@ -344,8 +543,8 @@ async function claimReward(rewardId) {
     // Render next boss
     renderGame(data);
     
-    // Load a fact for the new boss
-    await maybeLoadFact();
+    // Load a fact for the new boss (fire-and-forget, don't block rendering)
+    maybeLoadFact();
     
   } catch (err) {
     console.error(err);
@@ -375,6 +574,83 @@ function setDisabledChoices(disabled) {
   });
 }
 
+/**
+ * Disable/enable all item buttons (prevents use during choice resolution).
+ */
+function setItemsDisabled(disabled) {
+  for (const slot of Object.values(itemSlots)) {
+    if (slot.btn && !slot.btn.classList.contains("hidden")) {
+      slot.btn.disabled = Boolean(disabled);
+    }
+  }
+}
+
+/**
+ * Trigger background prefetch so scenes generate while user reads.
+ * Called once when a scene starts rendering, then periodically.
+ */
+function triggerPrefetch() {
+  fetch("/api/trigger_prefetch", { method: "POST" })
+    .then(r => r.json())
+    .then(data => {
+      // Stop polling if queue is already full
+      if (data.queue_size >= data.target) {
+        stopPrefetchPolling();
+      }
+    })
+    .catch(() => {});
+}
+
+function startPrefetchPolling() {
+  stopPrefetchPolling();
+  // Trigger immediately, then every 4 seconds while user reads
+  triggerPrefetch();
+  prefetchInterval = setInterval(triggerPrefetch, 4000);
+}
+
+function stopPrefetchPolling() {
+  if (prefetchInterval) {
+    clearInterval(prefetchInterval);
+    prefetchInterval = null;
+  }
+}
+
+async function typewriterScene(element, text, speed = 40) {
+  return new Promise((resolve) => {
+    let i = 0;
+    // Use a text node + cursor to avoid innerHTML rebuild every frame
+    const textNode = document.createTextNode("");
+    const cursor = document.createElement("span");
+    cursor.className = "scene-cursor";
+    element.innerHTML = "";
+    element.appendChild(textNode);
+    element.appendChild(cursor);
+    
+    // Hide choices container during animation
+    choicesEl.style.display = "none";
+
+    // Start prefetching while user reads the typewriter text
+    startPrefetchPolling();
+    
+    function type() {
+      if (i < text.length) {
+        textNode.textContent = text.substring(0, i + 1);
+        i++;
+        typewriterTimeout = setTimeout(type, speed);
+      } else {
+        // Animation complete - show clean text and reveal choices
+        setTimeout(() => {
+          cursor.remove();
+          choicesEl.style.display = "";  // Show choices
+          setDisabledChoices(false);  // Enable choices
+          resolve();
+        }, 300);
+      }
+    }
+    type();
+  });
+}
+
 function renderGame(data) {
   showGameScreen();
   setStatus("");
@@ -401,7 +677,10 @@ function renderGameData(data) {
   setBars({ playerHp: data.player_hp, bossHp: boss.hp });
   setPlayerStats(data);
 
-  sceneText.textContent = data.scene ?? "...";
+  // Apply typewriter effect to scene text asynchronously
+  const sceneContent = data.scene ?? "...";
+  typewriterScene(sceneText, sceneContent);
+  
   setChoices(data.choices ?? []);
 
   const wins = Number(data.wins ?? 0) || 0;
@@ -422,12 +701,100 @@ async function maybeLoadFact() {
   }
 }
 
+/**
+ * Show a floating damage number near a target element.
+ * @param {string} targetSelector - CSS selector for the element to anchor near
+ * @param {string} text - The damage text (e.g. "-12")
+ * @param {string} type - "boss-damage" (green) or "player-damage" (red)
+ */
+function showDamageNumber(targetSelector, text, type) {
+  const target = document.querySelector(targetSelector);
+  if (!target || !damageOverlay) return;
+
+  const rect = target.getBoundingClientRect();
+  const num = document.createElement("div");
+  num.className = `damage-number ${type}`;
+  num.textContent = text;
+
+  // Position near center of target with slight randomness
+  const offsetX = (Math.random() - 0.5) * 40;
+  num.style.left = `${rect.left + rect.width / 2 + offsetX}px`;
+  num.style.top = `${rect.top + rect.height * 0.3}px`;
+
+  damageOverlay.appendChild(num);
+
+  // Remove after animation completes
+  num.addEventListener("animationend", () => num.remove());
+  setTimeout(() => num.remove(), 1200); // Fallback cleanup
+}
+
+/**
+ * Flash a panel element with a colour class briefly.
+ */
+function flashPanel(selector, type) {
+  const el = document.querySelector(selector);
+  if (!el) return;
+  const classMap = {
+    "boss-damage":  "flash-green",
+    "player-damage": "flash-red",
+    "aegis-flash":  "aegis-flash",
+    "spell-flash":  "spell-flash",
+    "blast-flash":  "blast-flash",
+  };
+  const cls = classMap[type] || "flash-green";
+  el.classList.add(cls);
+  setTimeout(() => el.classList.remove(cls), 600);
+}
+
+/**
+ * Show victory screen with stats and fact.
+ */
+function showVictoryScreen(data) {
+  const msg = document.getElementById("victory_message");
+  const stats = document.getElementById("victory_stats");
+  const factEl = document.getElementById("victory_fact");
+  if (msg) msg.textContent = data.message || "Victory! You defeated all the bosses!";
+  if (stats) stats.textContent = `Bosses defeated: ${data.wins || 0}/${data.required_wins || 0}`;
+  if (factEl) {
+    fetch("/api/fact").then(r => r.json()).then(d => {
+      if (d?.fact) factEl.textContent = d.fact;
+    }).catch(() => {});
+  }
+  victoryScreen?.classList.remove("hidden");
+  gameScreen.classList.add("hidden");
+}
+
+/**
+ * Show defeat screen with stats and fact.
+ */
+function showDefeatScreen(data) {
+  const msg = document.getElementById("defeat_message");
+  const stats = document.getElementById("defeat_stats");
+  const factEl = document.getElementById("defeat_fact");
+  if (msg) msg.textContent = data.message || "You ran out of HP!";
+  if (stats) {
+    const bossName = data.boss?.name || "the boss";
+    stats.textContent = `Defeated by: ${bossName}`;
+  }
+  if (factEl) {
+    fetch("/api/fact").then(r => r.json()).then(d => {
+      if (d?.fact) factEl.textContent = d.fact;
+    }).catch(() => {});
+  }
+  defeatScreen?.classList.remove("hidden");
+  gameScreen.classList.add("hidden");
+}
+
 async function applyChoice(choiceId) {
-  if (inFlight) return;
+  if (inFlight || itemInFlight) return;
   inFlight = true;
   setDisabledChoices(true);
+  setItemsDisabled(true);
   if (turnFeedback) turnFeedback.textContent = "Resolving...";
   let outcome = null;
+
+  // Stop prefetch polling while we process the choice
+  stopPrefetchPolling();
 
   try {
     const res = await fetch("/api/apply_choice", {
@@ -443,16 +810,34 @@ async function applyChoice(choiceId) {
 
     outcome = data.outcome ?? null;
     const message = data.message ?? "";
+    const wasSustainable = data.was_sustainable ?? false;
 
-    // Update player stats
+    // Update player stats (updateItemBar runs inside, so re-disable items after)
     setPlayerStats(data);
+    setItemsDisabled(true);
 
-    if (outcome === "victory" || outcome === "player_defeated") {
-      setDisabledChoices(true);
-      restartBtn.classList.remove("hidden");
-      sceneText.textContent = data.message ?? sceneText.textContent;
-      if (turnFeedback) turnFeedback.textContent = message;
-      await maybeLoadFact();
+    // === DAMAGE ANIMATIONS ===
+    if (wasSustainable) {
+      // Green damage on boss
+      const bossDmg = data.boss ? (maxBossHp - Math.max(0, Number(data.boss.hp ?? 0))) : 0;
+      showDamageNumber(".boss-image", message, "boss-damage");
+      flashPanel(".boss-panel", "boss-damage");
+    } else {
+      // Red damage on player
+      showDamageNumber(".player-panel", message, "player-damage");
+      flashPanel(".player-panel", "player-damage");
+    }
+
+    // Brief pause to let the animation play before updating UI
+    await new Promise(r => setTimeout(r, 600));
+
+    if (outcome === "victory") {
+      showVictoryScreen(data);
+      return;
+    }
+
+    if (outcome === "player_defeated") {
+      showDefeatScreen(data);
       return;
     }
 
@@ -475,6 +860,9 @@ async function applyChoice(choiceId) {
     setDisabledChoices(false);
   } finally {
     inFlight = false;
-    if (outcome !== "victory" && outcome !== "player_defeated") setDisabledChoices(false);
+    if (outcome !== "victory" && outcome !== "player_defeated" && outcome !== "boss_defeated_choose_reward") {
+      setDisabledChoices(false);
+    }
+    setItemsDisabled(false);
   }
 }

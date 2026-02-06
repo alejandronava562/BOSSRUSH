@@ -109,6 +109,30 @@
         </div>
       </section>
 
+      <!-- Activatable Item Bar -->
+      <section id="item_bar" class="item-bar hidden" aria-label="Items">
+        <button id="item_noodles" class="item-slot hidden" type="button" data-item="noodles" title="Organic Crispy Noodles: +3 Attack + 10% Crit">
+          <span class="item-icon">🍜</span>
+          <span class="item-name">Noodles</span>
+          <span id="item_noodles_count" class="item-charge">0</span>
+        </button>
+        <button id="item_aegis" class="item-slot hidden" type="button" data-item="aegis" title="Everbloom Aegis: Permanent 50% damage reduction">
+          <span class="item-icon">🥻</span>
+          <span class="item-name">Aegis</span>
+          <span id="item_aegis_count" class="item-charge">0</span>
+        </button>
+        <button id="item_spell" class="item-slot hidden" type="button" data-item="spell" title="Gateway Of Living Grace: 3-turn 50% defense + 30% attack">
+          <span class="item-icon">🪄</span>
+          <span class="item-name">Spell</span>
+          <span id="item_spell_count" class="item-charge">0</span>
+        </button>
+        <button id="item_eco_blaster" class="item-slot hidden" type="button" data-item="eco_blaster" title="Eco Blaster: Remove one wrong answer">
+          <span class="item-icon">𒄉</span>
+          <span class="item-name">Blaster</span>
+          <span id="item_eco_blaster_count" class="item-charge">0</span>
+        </button>
+      </section>
+
       <section class="scene">
         <p id="scene_text">...</p>
       </section>
@@ -130,6 +154,33 @@
         <div id="reward_options" class="reward-options"></div>
       </div>
     </div>
+
+    <!-- Victory Screen -->
+    <div id="victory_screen" class="modal hidden" aria-hidden="true">
+      <div class="modal-content endgame-modal victory-modal">
+        <div class="endgame-icon">🏆</div>
+        <h2 class="endgame-title victory-title">Victory!</h2>
+        <p id="victory_message" class="endgame-message">You defeated all the bosses with sustainable choices!</p>
+        <p id="victory_stats" class="endgame-stats"></p>
+        <p id="victory_fact" class="endgame-fact muted"></p>
+        <button id="victoryRestartBtn" type="button" class="endgame-btn victory-btn">Play Again</button>
+      </div>
+    </div>
+
+    <!-- Defeat Screen -->
+    <div id="defeat_screen" class="modal hidden" aria-hidden="true">
+      <div class="modal-content endgame-modal defeat-modal">
+        <div class="endgame-icon">💀</div>
+        <h2 class="endgame-title defeat-title">Defeated!</h2>
+        <p id="defeat_message" class="endgame-message">You ran out of HP. Try again and pick more sustainable choices!</p>
+        <p id="defeat_stats" class="endgame-stats"></p>
+        <p id="defeat_fact" class="endgame-fact muted"></p>
+        <button id="defeatRestartBtn" type="button" class="endgame-btn defeat-btn">Try Again</button>
+      </div>
+    </div>
+
+    <!-- Damage number overlay -->
+    <div id="damage_overlay" class="damage-overlay" aria-hidden="true"></div>
   </main>
 
   <script src="{{url_for('static', filename='script.js')}}"></script>
